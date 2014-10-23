@@ -13,12 +13,22 @@ package com.codenvy.api.project.server;
 import com.google.inject.AbstractModule;
 import com.google.inject.multibindings.Multibinder;
 
-/** @author andrew00x */
+/**
+ * Deploys project API components.
+ *
+ * @author andrew00x
+ */
 public class BaseProjectModule extends AbstractModule {
     @Override
     protected void configure() {
         Multibinder.newSetBinder(binder(), ProjectImporter.class).addBinding().to(ZipProjectImporter.class);
         Multibinder.newSetBinder(binder(), ValueProviderFactory.class); /* empty binding */
         Multibinder.newSetBinder(binder(), ProjectGenerator.class); /* empty binding */
+        bind(ProjectTypeDescriptionsExtension.class);
+        bind(BaseProjectTypeExtension.class);
+        bind(ProjectService.class);
+        bind(ProjectTypeService.class);
+        bind(ProjectImportersService.class);
+        bind(ProjectEventService.class).asEagerSingleton();
     }
 }

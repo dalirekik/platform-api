@@ -13,7 +13,6 @@ package com.codenvy.api.builder;
 import com.codenvy.api.builder.dto.BaseBuilderRequest;
 import com.codenvy.api.builder.dto.BuildOptions;
 import com.codenvy.api.builder.dto.BuildRequest;
-import com.codenvy.api.builder.dto.BuildTaskDescriptor;
 import com.codenvy.api.builder.dto.BuilderDescriptor;
 import com.codenvy.api.builder.dto.BuilderServerAccessCriteria;
 import com.codenvy.api.builder.dto.BuilderServerLocation;
@@ -33,6 +32,7 @@ import com.codenvy.api.core.rest.HttpJsonHelper;
 import com.codenvy.api.core.rest.ServiceContext;
 import com.codenvy.api.core.rest.shared.dto.Link;
 import com.codenvy.api.project.server.ProjectService;
+import com.codenvy.api.project.shared.dto.BuildersDescriptor;
 import com.codenvy.api.project.shared.dto.ProjectDescriptor;
 import com.codenvy.api.workspace.server.WorkspaceService;
 import com.codenvy.api.workspace.shared.dto.WorkspaceDescriptor;
@@ -65,7 +65,6 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -336,7 +335,7 @@ public class BuildQueue {
             callable = createTaskFor(request);
         }
         final Long id = sequence.getAndIncrement();
-        final BuildFutureTask future = new BuildFutureTask(ThreadLocalPropagateContext.wrap(callable), id, wsId, project, reuse);
+        final InternalBuildTask future = new InternalBuildTask(ThreadLocalPropagateContext.wrap(callable), id, wsId, project, reuse);
         request.setId(id);
         final BuildQueueTask task = new BuildQueueTask(id, request, waitingTimeMillis, future, serviceContext.getServiceUriBuilder());
         tasks.put(id, task);
@@ -382,7 +381,7 @@ public class BuildQueue {
         request.setTimeout(getBuildTimeout(workspace));
         final Callable<RemoteTask> callable = createTaskFor(request);
         final Long id = sequence.getAndIncrement();
-        final BuildFutureTask future = new BuildFutureTask(ThreadLocalPropagateContext.wrap(callable), id, wsId, project, false);
+        final InternalBuildTask future = new InternalBuildTask(ThreadLocalPropagateContext.wrap(callable), id, wsId, project, false);
         request.setId(id);
         final BuildQueueTask task = new BuildQueueTask(id, request, waitingTimeMillis, future, serviceContext.getServiceUriBuilder());
         tasks.put(id, task);
@@ -400,13 +399,14 @@ public class BuildQueue {
     }
 
     private void addParametersFromProjectDescriptor(ProjectDescriptor descriptor, BaseBuilderRequest request) throws BuilderException {
-        final Map<String, List<String>> projectAttributes = descriptor.getAttributes();
         String builder = request.getBuilder();
         if (builder == null) {
-            builder = getProjectAttributeValue(Constants.BUILDER_NAME, projectAttributes);
+            final BuildersDescriptor builders = descriptor.getBuilders();
+            if (builders != null) {
+                builder = builders.getDefault();
+            }
             if (builder == null) {
-                throw new BuilderException(
-                        String.format("Name of builder is not specified, be sure property of project %s is set", Constants.BUILDER_NAME));
+                throw new BuilderException("Name of builder is not specified, be sure corresponded property of project is set");
             }
             request.setBuilder(builder);
         }
@@ -415,47 +415,12 @@ public class BuildQueue {
         }
         request.setProjectDescriptor(descriptor);
         request.setProjectUrl(descriptor.getBaseUrl());
-        final Link zipballLink = getLink(com.codenvy.api.project.server.Constants.LINK_REL_EXPORT_ZIP, descriptor.getLinks());
+        final Link zipballLink = descriptor.getLink(com.codenvy.api.project.server.Constants.LINK_REL_EXPORT_ZIP);
         if (zipballLink != null) {
             final String zipballLinkHref = zipballLink.getHref();
             final String token = getAuthenticationToken();
             request.setSourcesUrl(token != null ? String.format("%s?token=%s", zipballLinkHref, token) : zipballLinkHref);
         }
-        if (request.getTargets().isEmpty()) {
-            final List<String> targetsAttr = projectAttributes.get(Constants.BUILDER_TARGETS.replace("${builder}", builder));
-            if (targetsAttr != null && !targetsAttr.isEmpty()) {
-                request.getTargets().addAll(targetsAttr);
-            }
-        }
-        final List<String> optionsAttr = projectAttributes.get(Constants.BUILDER_OPTIONS.replace("${builder}", builder));
-        if (optionsAttr != null && !optionsAttr.isEmpty()) {
-            final Map<String, String> options = request.getOptions();
-            for (String str : optionsAttr) {
-                if (str != null) {
-                    final String[] pair = str.split("=");
-                    if (!options.containsKey(pair[0])) {
-                        options.put(pair[0], pair.length > 1 ? pair[1] : null);
-                    }
-                }
-            }
-        }
-    }
-
-    private static String getProjectAttributeValue(String name, Map<String, List<String>> attributes) {
-        final List<String> list = attributes.get(name);
-        if (list == null || list.isEmpty()) {
-            return null;
-        }
-        return list.get(0);
-    }
-
-    private static Link getLink(String rel, List<Link> links) {
-        for (Link link : links) {
-            if (rel.equals(link.getRel())) {
-                return link;
-            }
-        }
-        return null;
     }
 
     private ProjectDescriptor getProjectDescription(String workspace, String project, ServiceContext serviceContext)
@@ -564,13 +529,15 @@ public class BuildQueue {
                 @Override
                 protected void afterExecute(Runnable runnable, Throwable error) {
                     super.afterExecute(runnable, error);
-                    if (runnable instanceof BuildFutureTask) {
-                        final BuildFutureTask buildFutureTask = (BuildFutureTask)runnable;
-                        if (buildFutureTask.reused) {
-                            // Emulate event from remote builder. In fact we didn't send request to remote builder just reuse result from previous build.
-                            eventService.publish(BuilderEvent.doneEvent(buildFutureTask.id,
-                                                                        buildFutureTask.workspace,
-                                                                        buildFutureTask.project));
+                    if (runnable instanceof InternalBuildTask) {
+                        final InternalBuildTask internalBuildTask = (InternalBuildTask)runnable;
+                        if (internalBuildTask.reused) {
+                            // Emulate event from remote builder. In fact we didn't send request to remote builder just reuse result from previous
+                            // build.
+                            eventService.publish(BuilderEvent.doneEvent(internalBuildTask.id,
+                                                                        internalBuildTask.workspace,
+                                                                        internalBuildTask.project,
+                                                                        true));
                         }
                     }
                 }
@@ -592,7 +559,8 @@ public class BuildQueue {
                             if ((task.getCreationTime() + waitingTimeMillis) < System.currentTimeMillis()) {
                                 try {
                                     task.cancel();
-                                    eventService.publish(BuilderEvent.terminatedEvent(task.getId(), request.getWorkspace(), request.getProject()));
+                                    eventService.publish(
+                                            BuilderEvent.terminatedEvent(task.getId(), request.getWorkspace(), request.getProject()));
                                 } catch (Exception e) {
                                     LOG.warn(e.getMessage(), e);
                                 }
@@ -648,80 +616,10 @@ public class BuildQueue {
                 }
             });
 
-            eventService.subscribe(new EventSubscriber<BuilderEvent>() {
-                @Override
-                public void onEvent(BuilderEvent event) {
-                    try {
-                        final ChannelBroadcastMessage bm = new ChannelBroadcastMessage();
-                        final long id = event.getTaskId();
-                        switch (event.getType()) {
-                            case BEGIN:
-                            case DONE:
-                                bm.setChannel(String.format("builder:status:%d", id));
-                                try {
-                                    bm.setBody(DtoFactory.getInstance().toJson(getTask(id).getDescriptor()));
-                                } catch (BuilderException re) {
-                                    bm.setType(ChannelBroadcastMessage.Type.ERROR);
-                                    bm.setBody(String.format("{\"message\":%s}", JsonUtils.getJsonString(re.getMessage())));
-                                }
-                                break;
-                            case MESSAGE_LOGGED:
-                                final BuilderEvent.LoggedMessage message = event.getMessage();
-                                if (message != null) {
-                                    bm.setChannel(String.format("builder:output:%d", id));
-                                    bm.setBody(String.format("{\"num\":%d, \"line\":%s}",
-                                                             message.getLineNum(), JsonUtils.getJsonString(message.getMessage())));
-                                }
-                                break;
-                        }
-                        WSConnectionContext.sendMessage(bm);
-                    } catch (Exception e) {
-                        LOG.error(e.getMessage(), e);
-                    }
-                }
-            });
+            eventService.subscribe(new BuildStatusMessenger());
 
-            eventService.subscribe(new EventSubscriber<BuilderEvent>() {
-                @Override
-                public void onEvent(BuilderEvent event) {
-                    try {
-                        final long taskId = event.getTaskId();
-                        final BaseBuilderRequest request = getTask(taskId).getRequest();
-                        if (request instanceof BuildRequest) {
-                            BuildQueueTask task = getTask(taskId);
-                            final String analyticsID = task.getCreationTime() + "-" + taskId;
-                            final String project = event.getProject();
-                            final String workspace = request.getWorkspace();
-                            final String projectTypeId = request.getProjectDescriptor().getProjectTypeId();
-                            final String user = request.getUserName();
-                            long waitingTime = task.getWaitingTime();
-
-                            switch (event.getType()) {
-                                case BEGIN:
-                                    LOG.info("EVENT#build-queue-waiting-finished# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}#", workspace, user,
-                                             project, projectTypeId, analyticsID);
-                                    LOG.info("EVENT#build-started# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# WAITING_TIME#{}# ID#{}#", workspace, user,
-                                             project, projectTypeId, waitingTime, analyticsID);
-                                    break;
-                                case DONE:
-                                    LOG.info("EVENT#build-finished# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}#", workspace, user, project,
-                                             projectTypeId, analyticsID);
-                                    break;
-                                case BUILD_TASK_ADDED_IN_QUEUE:
-                                    LOG.info("EVENT#build-queue-waiting-started# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}#", workspace, user,
-                                             project, projectTypeId, analyticsID);
-                                    break;
-                                case BUILD_TASK_QUEUE_TIME_EXCEEDED:
-                                    LOG.info("EVENT#build-queue-terminated# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}#", workspace, user, project,
-                                             projectTypeId, analyticsID);
-                                    break;
-                            }
-                        }
-                    } catch (Exception e) {
-                        LOG.error(e.getMessage(), e);
-                    }
-                }
-            });
+            //Log events for analytics
+            eventService.subscribe(new AnalyticsMessenger());
 
             if (slaves.length > 0) {
                 executor.execute(new Runnable() {
@@ -823,13 +721,13 @@ public class BuildQueue {
         return eventService;
     }
 
-    private static class BuildFutureTask extends FutureTask<RemoteTask> {
+    private static class InternalBuildTask extends FutureTask<RemoteTask> {
         final Long    id;
         final String  workspace;
         final String  project;
         final boolean reused;
 
-        BuildFutureTask(Callable<RemoteTask> callable, Long id, String workspace, String project, boolean reused) {
+        InternalBuildTask(Callable<RemoteTask> callable, Long id, String workspace, String project, boolean reused) {
             super(callable);
             this.id = id;
             this.workspace = workspace;
@@ -964,6 +862,136 @@ public class BuildQueue {
                     }
                     return available.get(0);
                 }
+            }
+        }
+    }
+
+    private class AnalyticsMessenger implements EventSubscriber<BuilderEvent> {
+        @Override
+        public void onEvent(BuilderEvent event) {
+            try {
+                final long taskId = event.getTaskId();
+                final BaseBuilderRequest request = getTask(taskId).getRequest();
+                if (request instanceof BuildRequest) {
+                    BuildQueueTask task = getTask(taskId);
+                    final String analyticsID = task.getCreationTime() + "-" + taskId;
+                    final String project = extractProjectName(event.getProject());
+                    final String workspace = request.getWorkspace();
+                    final long timeout;
+                    if (request.getTimeout() == Integer.MAX_VALUE) {
+                        timeout = -1;
+                    } else {
+                        timeout = request.getTimeout() * 1000; // to ms
+                    }
+                    final String projectTypeId = request.getProjectDescriptor().getType();
+                    final String user = request.getUserName();
+
+                    switch (event.getType()) {
+                        case BEGIN:
+                            long waitingTime = System.currentTimeMillis() - task.getCreationTime();
+                            LOG.info(
+                                    "EVENT#build-queue-waiting-finished# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}# WAITING-TIME#{}#",
+                                    workspace,
+                                    user,
+                                    project,
+                                    projectTypeId,
+                                    analyticsID,
+                                    waitingTime);
+                            LOG.info("EVENT#build-started# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}# TIMEOUT#{}#",
+                                     workspace,
+                                     user,
+                                     project,
+                                     projectTypeId,
+                                     analyticsID,
+                                     timeout);
+                            break;
+                        case DONE:
+                            if (!event.isReused()) {
+                                long usageTime = task.getDescriptor().getEndTime() - task.getDescriptor().getStartTime();
+                                long finishedNormally = timeout == -1 || timeout > usageTime ? 1 : 0;
+                                LOG.info(
+                                        "EVENT#build-finished# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}# TIMEOUT#{}# USAGE-TIME#{}# FINISHED-NORMALLY#{}#",
+                                        workspace,
+                                        user,
+                                        project,
+                                        projectTypeId,
+                                        analyticsID,
+                                        timeout,
+                                        usageTime,
+                                        finishedNormally);
+                            } else {
+                                LOG.info(
+                                        "EVENT#build-queue-waiting-finished# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}# WAITING-TIME#{}#",
+                                        workspace,
+                                        user,
+                                        project,
+                                        projectTypeId,
+                                        analyticsID,
+                                        0);
+                            }
+                            break;
+                        case BUILD_TASK_ADDED_IN_QUEUE:
+                            LOG.info("EVENT#build-queue-waiting-started# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}#",
+                                     workspace,
+                                     user,
+                                     project,
+                                     projectTypeId,
+                                     analyticsID);
+                            break;
+                        case BUILD_TASK_QUEUE_TIME_EXCEEDED:
+                            waitingTime = System.currentTimeMillis() - task.getCreationTime();
+                            LOG.info("EVENT#build-queue-terminated# WS#{}# USER#{}# PROJECT#{}# TYPE#{}# ID#{}# WAITING-TIME#{}",
+                                     workspace,
+                                     user,
+                                     project,
+                                     projectTypeId,
+                                     analyticsID,
+                                     waitingTime);
+                            break;
+                    }
+                }
+            } catch (Exception e) {
+                LOG.error(e.getMessage(), e);
+            }
+        }
+
+        private String extractProjectName(String path) {
+            int beginIndex = path.startsWith("/") ? 1 : 0;
+            int i = path.indexOf("/", beginIndex);
+            int endIndex = i < 0 ? path.length() : i;
+            return path.substring(beginIndex, endIndex);
+        }
+    }
+
+    private class BuildStatusMessenger implements EventSubscriber<BuilderEvent> {
+        @Override
+        public void onEvent(BuilderEvent event) {
+            try {
+                final ChannelBroadcastMessage bm = new ChannelBroadcastMessage();
+                final long id = event.getTaskId();
+                switch (event.getType()) {
+                    case BEGIN:
+                    case DONE:
+                        bm.setChannel(String.format("builder:status:%d", id));
+                        try {
+                            bm.setBody(DtoFactory.getInstance().toJson(getTask(id).getDescriptor()));
+                        } catch (BuilderException re) {
+                            bm.setType(ChannelBroadcastMessage.Type.ERROR);
+                            bm.setBody(String.format("{\"message\":%s}", JsonUtils.getJsonString(re.getMessage())));
+                        }
+                        break;
+                    case MESSAGE_LOGGED:
+                        final BuilderEvent.LoggedMessage message = event.getMessage();
+                        if (message != null) {
+                            bm.setChannel(String.format("builder:output:%d", id));
+                            bm.setBody(String.format("{\"num\":%d, \"line\":%s}",
+                                                     message.getLineNum(), JsonUtils.getJsonString(message.getMessage())));
+                        }
+                        break;
+                }
+                WSConnectionContext.sendMessage(bm);
+            } catch (Exception e) {
+                LOG.error(e.getMessage(), e);
             }
         }
     }

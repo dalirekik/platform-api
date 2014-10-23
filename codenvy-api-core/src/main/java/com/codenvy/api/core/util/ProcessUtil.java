@@ -32,19 +32,11 @@ public final class ProcessUtil {
             inputReader = new BufferedReader(new InputStreamReader(inputStream));
             errorReader = new BufferedReader(new InputStreamReader(errorStream));
             String line;
-            try {
-                while ((line = inputReader.readLine()) != null) {
-                    stdout.writeLine(line);
-                }
-            } finally {
-                stdout.close();
+            while ((line = inputReader.readLine()) != null) {
+                stdout.writeLine(line);
             }
-            try {
-                while ((line = errorReader.readLine()) != null) {
-                    stderr.writeLine(line);
-                }
-            } finally {
-                stderr.close();
+            while ((line = errorReader.readLine()) != null) {
+                stderr.writeLine(line);
             }
         } finally {
             if (inputReader != null) {
@@ -60,6 +52,30 @@ public final class ProcessUtil {
                 }
             }
         }
+    }
+
+    /**
+     * Start the process, writing the stdout and stderr to consumer.
+     *
+     * @param pb
+     *         process builder to start
+     * @param consumer
+     *         a consumer where stdout and stderr will be redirected
+     * @return the started process
+     * @throws IOException
+     */
+    public static Process execute(ProcessBuilder pb, LineConsumer consumer) throws IOException {
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+
+        final InputStream inputStream = process.getInputStream();
+        BufferedReader inputReader = new BufferedReader(new InputStreamReader(inputStream));
+        String line;
+        while ((line = inputReader.readLine()) != null) {
+            consumer.writeLine(line);
+        }
+
+        return process;
     }
 
     public static boolean isAlive(Process process) {
@@ -89,4 +105,3 @@ public final class ProcessUtil {
     private ProcessUtil() {
     }
 }
-

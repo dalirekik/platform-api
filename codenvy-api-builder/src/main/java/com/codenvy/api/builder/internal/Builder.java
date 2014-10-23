@@ -13,13 +13,15 @@ package com.codenvy.api.builder.internal;
 import com.codenvy.api.builder.BuilderException;
 import com.codenvy.api.builder.dto.BaseBuilderRequest;
 import com.codenvy.api.builder.dto.BuildRequest;
-import com.codenvy.api.builder.dto.BuilderDescriptor;
 import com.codenvy.api.builder.dto.BuilderEnvironment;
 import com.codenvy.api.builder.dto.BuilderMetric;
 import com.codenvy.api.builder.dto.DependencyRequest;
+import com.codenvy.api.builder.internal.BuilderEvent.EventType;
 import com.codenvy.api.core.ApiException;
 import com.codenvy.api.core.NotFoundException;
 import com.codenvy.api.core.notification.EventService;
+import com.codenvy.api.core.notification.EventSubscriber;
+import com.codenvy.api.core.util.Cancellable;
 import com.codenvy.api.core.util.CancellableProcessWrapper;
 import com.codenvy.api.core.util.CommandLine;
 import com.codenvy.api.core.util.ProcessUtil;
@@ -35,13 +37,11 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -68,15 +68,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public abstract class Builder {
     private static final Logger LOG = LoggerFactory.getLogger(Builder.class);
 
-    /** @deprecated use {@link com.codenvy.api.builder.internal.Constants#BASE_DIRECTORY} */
-    public static final String REPOSITORY              = Constants.BASE_DIRECTORY;
-    /** @deprecated use {@link com.codenvy.api.builder.internal.Constants#NUMBER_OF_WORKERS} */
-    public static final String NUMBER_OF_WORKERS       = Constants.NUMBER_OF_WORKERS;
-    /** @deprecated use {@link com.codenvy.api.builder.internal.Constants#KEEP_RESULT_TIME} */
-    public static final String CLEAN_RESULT_DELAY_TIME = Constants.KEEP_RESULT_TIME;
-    /** @deprecated use {@link com.codenvy.api.builder.internal.Constants#QUEUE_SIZE} */
-    public static final String INTERNAL_QUEUE_SIZE     = Constants.QUEUE_SIZE;
-
     private static final AtomicLong buildIdSequence = new AtomicLong(1);
 
     private final ConcurrentMap<Long, FutureBuildTask> tasks;
@@ -92,7 +83,7 @@ public abstract class Builder {
     private ScheduledExecutorService scheduler;
     private java.io.File             repository;
     private java.io.File             builds;
-    private SourcesManager           sourcesManager;
+    private SourcesManagerImpl       sourcesManager;
 
     public Builder(java.io.File rootDirectory, int numberOfWorkers, int queueSize, int keepResultTime, EventService eventService) {
         this.rootDirectory = rootDirectory;
@@ -165,7 +156,9 @@ public abstract class Builder {
             if (!(builds.exists() || builds.mkdirs())) {
                 throw new IllegalStateException(String.format("Unable create directory %s", builds.getAbsolutePath()));
             }
+            // TODO: use single instance of SourceManager
             sourcesManager = new SourcesManagerImpl(sources);
+            sourcesManager.start(); // TODO: guice must do this
             executor = new MyThreadPoolExecutor(numberOfWorkers <= 0 ? Runtime.getRuntime().availableProcessors() : numberOfWorkers,
                                                 queueSize);
             scheduler = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory(getName() + "-BuilderSchedulerPool-", true));
@@ -178,14 +171,6 @@ public abstract class Builder {
                         }
                         final FutureBuildTask task = i.next();
                         if (task.isExpired()) {
-                            if (!task.isDone()) {
-                                try {
-                                    task.cancel();
-                                } catch (RuntimeException e) {
-                                    LOG.error(e.getMessage(), e);
-                                    continue; // try next time
-                                }
-                            }
                             i.remove();
                             try {
                                 cleanup(task);
@@ -256,6 +241,7 @@ public abstract class Builder {
             }
             tasks.clear();
             buildListeners.clear();
+            sourcesManager.stop(); // TODO: guice must do this
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -404,15 +390,18 @@ public abstract class Builder {
         final Long internalId = buildIdSequence.getAndIncrement();
         final BuildTask.Callback callback = new BuildTask.Callback() {
             @Override
-            public void begin(BuildTask task) {
-                final BaseBuilderRequest buildRequest = task.getConfiguration().getRequest();
-                eventService.publish(BuilderEvent.beginEvent(buildRequest.getId(), buildRequest.getWorkspace(), buildRequest.getProject()));
-            }
+            public void begin(BuildTask task) {}
 
             @Override
             public void done(BuildTask task) {
                 final BaseBuilderRequest buildRequest = task.getConfiguration().getRequest();
                 eventService.publish(BuilderEvent.doneEvent(buildRequest.getId(), buildRequest.getWorkspace(), buildRequest.getProject()));
+                try {
+                    myLogger.close();
+                    LOG.debug("Close build logger {}", myLogger);
+                } catch (IOException e) {
+                    LOG.error(e.getMessage(), e);
+                }
             }
         };
         final FutureBuildTask task = new FutureBuildTask(callable, internalId, commandLine, getName(), configuration, myLogger, callback);
@@ -438,7 +427,11 @@ public abstract class Builder {
             public Boolean call() throws Exception {
                 BaseBuilderRequest request = configuration.getRequest();
                 getSourcesManager()
-                        .getSources(request.getWorkspace(), request.getProject(), request.getSourcesUrl(), configuration.getWorkDir());
+                        .getSources(logger, request.getWorkspace(), request.getProject(), request.getSourcesUrl(), configuration.getWorkDir());
+                // build effectively starts right after sources downloading is done
+                eventService.publish(BuilderEvent.buildTimeStartedEvent(request.getId(), request.getWorkspace(), request.getProject(),
+                                                                        System.currentTimeMillis()));
+                eventService.publish(BuilderEvent.beginEvent(request.getId(), request.getWorkspace(), request.getProject()));
                 StreamPump output = null;
                 Watchdog watcher = null;
                 int result = -1;
@@ -449,7 +442,16 @@ public abstract class Builder {
 
                     if (timeout > 0) {
                         watcher = new Watchdog(getName().toUpperCase() + "-WATCHDOG", timeout, TimeUnit.SECONDS);
-                        watcher.start(new CancellableProcessWrapper(process));
+                        watcher.start(new CancellableProcessWrapper(process, new Cancellable.Callback() {
+                            @Override
+                            public void cancelled(Cancellable cancellable) {
+                                try {
+                                    logger.writeLine("[ERROR] Your build has been shutdown due to timeout. Upgrade to get more build time.");
+                                } catch (IOException e) {
+                                    LOG.error(e.getMessage(), e);
+                                }
+                            }
+                        }));
                     }
                     output = new StreamPump();
                     output.start(process, logger);
@@ -458,6 +460,11 @@ public abstract class Builder {
                     } catch (InterruptedException e) {
                         Thread.interrupted(); // we interrupt thread when cancel task
                         ProcessUtil.kill(process);
+                    }
+                    try {
+                        output.await(); // wait for logger
+                    } catch (InterruptedException e) {
+                        Thread.interrupted(); // we interrupt thread when cancel task, NOTE: logs may be incomplete
                     }
                 } finally {
                     if (watcher != null) {
@@ -482,7 +489,8 @@ public abstract class Builder {
      *         build task
      */
     protected void cleanup(BuildTask task) {
-        final java.io.File workDir = task.getConfiguration().getWorkDir();
+        final BuilderConfiguration configuration = task.getConfiguration();
+        final java.io.File workDir = configuration.getWorkDir();
         if (workDir != null && workDir.exists()) {
             if (!IoUtil.deleteRecursive(workDir)) {
                 LOG.warn("Unable delete directory {}", workDir);
@@ -491,7 +499,7 @@ public abstract class Builder {
         final java.io.File log = task.getBuildLogger().getFile();
         if (log != null && log.exists()) {
             if (!log.delete()) {
-                LOG.warn("Unable delete file {}", workDir);
+                LOG.warn("Unable delete file {}", log);
             }
         }
         BuildResult result = null;
@@ -506,7 +514,7 @@ public abstract class Builder {
                 for (java.io.File artifact : artifacts) {
                     if (artifact.exists()) {
                         if (!artifact.delete()) {
-                            LOG.warn("Unable delete file {}", workDir);
+                            LOG.warn("Unable delete file {}", artifact);
                         }
                     }
                 }
@@ -515,9 +523,15 @@ public abstract class Builder {
                 java.io.File report = result.getBuildReport();
                 if (report != null && report.exists()) {
                     if (!report.delete()) {
-                        LOG.warn("Unable delete file {}", workDir);
+                        LOG.warn("Unable delete file {}", report);
                     }
                 }
+            }
+        }
+        final java.io.File buildDir = configuration.getBuildDir();
+        if (buildDir != null && buildDir.exists()) {
+            if (!IoUtil.deleteRecursive(buildDir)) {
+                LOG.warn("Unable delete directory {}", buildDir);
             }
         }
     }
@@ -620,6 +634,16 @@ public abstract class Builder {
             this.callback = callback;
             startTime = -1L;
             endTime = -1L;
+
+            eventService.subscribe(new EventSubscriber<BuilderEvent>() {
+                @Override
+                public void onEvent(BuilderEvent event) {
+                    if (event.getType() == EventType.BUILD_TIME_STARTED) {
+                        final BuilderEvent.LoggedMessage message = event.getMessage();
+                        startTime = Long.parseLong(message.getMessage());
+                    }
+                }
+            });
         }
 
         @Override
@@ -695,7 +719,6 @@ public abstract class Builder {
         }
 
         final synchronized void started() {
-            startTime = System.currentTimeMillis();
             if (callback != null) {
                 // NOTE: important to do it in separate thread!
                 getExecutor().execute(new Runnable() {

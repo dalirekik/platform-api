@@ -15,7 +15,7 @@ import com.google.gson.JsonElement;
 /**
  * Provides implementation of DTO interface.
  *
- * @author <a href="mailto:aparfonov@codenvy.com">Andrey Parfonov</a>
+ * @author andrew00x
  */
 public interface DtoProvider<DTO> {
     Class<? extends DTO> getImplClass();

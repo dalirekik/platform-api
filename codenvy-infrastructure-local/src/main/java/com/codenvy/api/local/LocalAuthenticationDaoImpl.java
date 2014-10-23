@@ -21,8 +21,13 @@ import javax.inject.Singleton;
 @Singleton
 public class LocalAuthenticationDaoImpl implements AuthenticationDao {
     @Override
+<<<<<<< HEAD
     public Token login(Credentials credentials) throws ApiException {
         return DtoFactory.getInstance().createDto(Token.class).withValue("123123");
+=======
+    public Response login(Credentials credentials, Cookie tokenAccessCookie, UriInfo uriInfo) throws AuthenticationException {
+        return Response.ok().entity((DtoFactory.getInstance().createDto(Token.class).withValue("123123"))).build();
+>>>>>>> origin/master
     }
 
     @Override

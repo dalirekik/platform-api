@@ -11,10 +11,6 @@
 package com.codenvy.api.project.server;
 
 import com.codenvy.api.core.notification.EventService;
-import com.codenvy.api.project.shared.Attribute;
-import com.codenvy.api.project.shared.AttributeDescription;
-import com.codenvy.api.project.shared.ProjectDescription;
-import com.codenvy.api.project.shared.ProjectType;
 import com.codenvy.api.vfs.server.VirtualFileSystemRegistry;
 import com.codenvy.api.vfs.server.VirtualFileSystemUser;
 import com.codenvy.api.vfs.server.VirtualFileSystemUserContext;
@@ -44,7 +40,7 @@ public class ProjectEventTest {
     @BeforeMethod
     public void setUp() throws Exception {
         EventService eventService = new EventService();
-        ProjectTypeDescriptionRegistry ptdr = new ProjectTypeDescriptionRegistry();
+        ProjectTypeDescriptionRegistry ptdr = new ProjectTypeDescriptionRegistry("test");
         ptdr.registerDescription(new ProjectTypeDescriptionExtension() {
             @Override
             public List<ProjectType> getProjectTypes() {

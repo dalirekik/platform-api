@@ -26,6 +26,8 @@ public interface RunnerMetric {
 
     String ALWAYS_ON = "Always On";
 
+    String LIFETIME = "lifetime";
+
     String TERMINATION_TIME = "terminationTime";
 
     String START_TIME = "startTime";
@@ -37,6 +39,8 @@ public interface RunnerMetric {
     String TOTAL_APPS = "totalApps";
 
     String RUNNING_APPS = "runningApps";
+
+    String MEMORY ="memory";
 
     String getName();
 

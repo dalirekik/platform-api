@@ -32,7 +32,7 @@ public class EventLogger {
     private static final int MAX_EXTENDED_PARAMS_NUMBER = 3;
     private static final int RESERVED_PARAMS_NUMBER     = 6;
     private static final int MAX_PARAM_NAME_LENGTH      = 20;
-    private static final int MAX_PARAM_VALUE_LENGTH     = 50;
+    private static final int MAX_PARAM_VALUE_LENGTH     = 100;
     private static final int QUEUE_MAX_CAPACITY         = 10000;
 
     public static final String EVENT_PARAM        = "EVENT";
@@ -50,6 +50,8 @@ public class EventLogger {
     public static final String SESSION_FINISHED        = "session-finished";
     public static final String SESSION_FACTORY_STARTED = "session-factory-started";
     public static final String SESSION_FACTORY_STOPPED = "session-factory-stopped";
+    public static final String SESSION_USAGE           = "session-usage";
+    public static final String SESSION_FACTORY_USAGE   = "session-factory-usage";
 
     private static final Set<String> ALLOWED_EVENTS = new HashSet<String>() {{
         add(IDE_USAGE);
@@ -58,6 +60,8 @@ public class EventLogger {
         add(SESSION_FINISHED);
         add(SESSION_FACTORY_STARTED);
         add(SESSION_FACTORY_STOPPED);
+        add(SESSION_USAGE);
+        add(SESSION_FACTORY_USAGE);
     }};
 
     private final Thread        logThread;

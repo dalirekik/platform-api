@@ -10,9 +10,11 @@
  *******************************************************************************/
 package com.codenvy.api.runner.dto;
 
+import com.codenvy.api.project.shared.dto.RunnerEnvironment;
 import com.codenvy.dto.shared.DTO;
+import com.wordnik.swagger.annotations.ApiModelProperty;
 
-import java.util.Map;
+import java.util.List;
 
 /**
  * Describes capabilities of {@link com.codenvy.api.runner.internal.Runner}.
@@ -20,7 +22,7 @@ import java.util.Map;
  * @author andrew00x
  * @see com.codenvy.api.runner.internal.Runner
  * @see com.codenvy.api.runner.internal.Runner#getName()
- * @see com.codenvy.api.runner.internal.SlaveRunnerService#availableRunners()
+ * @see com.codenvy.api.runner.internal.SlaveRunnerService#getAvailableRunners()
  */
 @DTO
 public interface RunnerDescriptor {
@@ -29,6 +31,7 @@ public interface RunnerDescriptor {
      *
      * @return runner name
      */
+    @ApiModelProperty(value = "Runner name", notes = "Consult docs to get runner name reference")
     String getName();
 
     /**
@@ -46,6 +49,7 @@ public interface RunnerDescriptor {
      *
      * @return runner description
      */
+    @ApiModelProperty(value = "Description")
     String getDescription();
 
     /**
@@ -58,9 +62,9 @@ public interface RunnerDescriptor {
 
     RunnerDescriptor withDescription(String description);
 
-    Map<String, RunnerEnvironment> getEnvironments();
+    List<RunnerEnvironment> getEnvironments();
 
-    void setEnvironments(Map<String, RunnerEnvironment> environments);
+    void setEnvironments(List<RunnerEnvironment> environments);
 
-    RunnerDescriptor withEnvironments(Map<String, RunnerEnvironment> environments);
+    RunnerDescriptor withEnvironments(List<RunnerEnvironment> environments);
 }

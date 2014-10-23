@@ -13,6 +13,7 @@ package com.codenvy.dto.server;
 import com.codenvy.commons.lang.cache.Cache;
 import com.codenvy.commons.lang.cache.LoadingValueSLRUCache;
 import com.codenvy.commons.lang.cache.SynchronizedCache;
+import com.codenvy.commons.lang.reflect.ParameterizedTypeImpl;
 import com.codenvy.dto.shared.DTO;
 import com.codenvy.dto.shared.JsonArray;
 import com.codenvy.dto.shared.JsonStringMap;
@@ -38,7 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Provides implementations of DTO interfaces.
  *
- * @author <a href="mailto:aparfonov@codenvy.com">Andrey Parfonov</a>
+ * @author andrew00x
  */
 public final class DtoFactory {
     private static final Gson gson = new GsonBuilder().serializeNulls().create();

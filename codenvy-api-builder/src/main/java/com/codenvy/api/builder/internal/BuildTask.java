@@ -95,9 +95,9 @@ public interface BuildTask {
     boolean isDone();
 
     /**
-     * Reports that the process was interrupted.
+     * Reports that the process is interrupted.
      *
-     * @return {@code true} if task was interrupted and {@code false} otherwise
+     * @return {@code true} if task is interrupted and {@code false} otherwise
      */
     boolean isCancelled();
 

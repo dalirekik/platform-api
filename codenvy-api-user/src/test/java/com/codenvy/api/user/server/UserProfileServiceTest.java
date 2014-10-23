@@ -12,56 +12,72 @@ package com.codenvy.api.user.server;
 
 import sun.security.acl.PrincipalImpl;
 
-import com.codenvy.api.core.rest.Service;
+import com.codenvy.api.core.NotFoundException;
+import com.codenvy.api.core.ServerException;
+import com.codenvy.api.core.rest.ApiExceptionMapper;
 import com.codenvy.api.core.rest.shared.dto.Link;
+import com.codenvy.api.user.server.dao.PreferenceDao;
 import com.codenvy.api.user.server.dao.Profile;
+import com.codenvy.api.user.server.dao.User;
 import com.codenvy.api.user.server.dao.UserDao;
 import com.codenvy.api.user.server.dao.UserProfileDao;
 import com.codenvy.api.user.shared.dto.ProfileDescriptor;
-import com.codenvy.api.user.shared.dto.User;
+import com.codenvy.api.user.shared.dto.UserDescriptor;
 import com.codenvy.commons.json.JsonHelper;
-import com.codenvy.dto.server.DtoFactory;
+import com.codenvy.commons.json.JsonParseException;
+import com.codenvy.dto.shared.JsonStringMap;
+import com.google.common.reflect.TypeToken;
 
 import org.everrest.core.impl.ApplicationContextImpl;
 import org.everrest.core.impl.ApplicationProviderBinder;
+import org.everrest.core.impl.ContainerRequest;
 import org.everrest.core.impl.ContainerResponse;
 import org.everrest.core.impl.EnvironmentContext;
 import org.everrest.core.impl.EverrestConfiguration;
 import org.everrest.core.impl.EverrestProcessor;
 import org.everrest.core.impl.ProviderBinder;
-import org.everrest.core.impl.RequestDispatcher;
-import org.everrest.core.impl.RequestHandlerImpl;
 import org.everrest.core.impl.ResourceBinderImpl;
 import org.everrest.core.tools.DependencySupplierImpl;
 import org.everrest.core.tools.ResourceLauncher;
 import org.mockito.Mock;
 import org.mockito.testng.MockitoTestNGListener;
-import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
 
-import javax.annotation.security.RolesAllowed;
+import javax.ws.rs.core.Response;
 import javax.ws.rs.core.SecurityContext;
 import javax.ws.rs.core.UriInfo;
 
-import java.lang.reflect.Method;
+import java.net.URI;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import static javax.ws.rs.core.Response.Status;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.refEq;
+import static com.codenvy.api.user.server.Constants.LINK_REL_UPDATE_CURRENT_USER_PROFILE;
+import static com.codenvy.api.user.server.Constants.LINK_REL_GET_CURRENT_USER_PROFILE;
+import static com.codenvy.api.user.server.Constants.LINK_REL_GET_USER_PROFILE_BY_ID;
+import static com.codenvy.api.user.server.Constants.LINK_REL_UPDATE_PREFERENCES;
+
+import static com.codenvy.api.user.server.Constants.LINK_REL_UPDATE_USER_PROFILE_BY_ID;
+import static java.util.Arrays.asList;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singleton;
+import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
+import static javax.ws.rs.core.Response.Status.OK;
+import static javax.ws.rs.core.Response.Status.NO_CONTENT;
+
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.fail;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 
 /**
  * Tests for {@link UserProfileService}
@@ -74,14 +90,15 @@ public class UserProfileServiceTest {
 
     private static final String BASE_URI     = "http://localhost/service";
     private static final String SERVICE_PATH = BASE_URI + "/profile";
-    private static final String USER_ID      = "user123abc456def";
 
     @Mock
-    private UserProfileDao     userProfileDao;
+    private UserProfileDao     profileDao;
     @Mock
     private UserDao            userDao;
     @Mock
-    private User               user;
+    private PreferenceDao      preferenceDao;
+    @Mock
+    private User               testUser;
     @Mock
     private UriInfo            uriInfo;
     @Mock
@@ -89,283 +106,318 @@ public class UserProfileServiceTest {
     @Mock
     private SecurityContext    securityContext;
     private ResourceLauncher   launcher;
+    private UserProfileService service;
 
     @BeforeMethod
     public void setUp() throws Exception {
-        ResourceBinderImpl resources = new ResourceBinderImpl();
-        ProviderBinder providers = new ApplicationProviderBinder();
-        DependencySupplierImpl dependencies = new DependencySupplierImpl();
-        dependencies.addComponent(UserProfileDao.class, userProfileDao);
-        dependencies.addComponent(UserDao.class, userDao);
+        final ResourceBinderImpl resources = new ResourceBinderImpl();
         resources.addResource(UserProfileService.class, null);
-        EverrestProcessor processor = new EverrestProcessor(resources, providers, dependencies, new EverrestConfiguration(), null);
+        final DependencySupplierImpl dependencies = new DependencySupplierImpl();
+        dependencies.addComponent(UserDao.class, userDao);
+        dependencies.addComponent(UserProfileDao.class, profileDao);
+        dependencies.addComponent(PreferenceDao.class, preferenceDao);
+        final URI uri = new URI(BASE_URI);
+        final ContainerRequest req = new ContainerRequest(null, uri, uri, null, null, securityContext);
+        final ApplicationContextImpl contextImpl = new ApplicationContextImpl(req, null, ProviderBinder.getInstance());
+        contextImpl.setDependencySupplier(dependencies);
+        ApplicationContextImpl.setCurrent(contextImpl);
+        final ApplicationProviderBinder binder = new ApplicationProviderBinder();
+        binder.addExceptionMapper(ApiExceptionMapper.class);
+        final EverrestProcessor processor = new EverrestProcessor(resources,
+                                                                  binder,
+                                                                  dependencies,
+                                                                  new EverrestConfiguration(),
+                                                                  null);
         launcher = new ResourceLauncher(processor);
-        ApplicationContextImpl.setCurrent(new ApplicationContextImpl(null, null, ProviderBinder.getInstance()));
-
+        service = (UserProfileService)resources.getMatchedResource("/profile", new ArrayList<String>())
+                                               .getInstance(ApplicationContextImpl.getCurrent());
+        //setup testUser
+        final String id = "user123abc456def";
+        final String email = "user@testuser.com";
+        when(testUser.getEmail()).thenReturn(email);
+        when(testUser.getId()).thenReturn(id);
         when(environmentContext.get(SecurityContext.class)).thenReturn(securityContext);
-        when(securityContext.getUserPrincipal()).thenReturn(new PrincipalImpl("user@testuser.com"));
-        when(userDao.getByAlias(anyString())).thenReturn(user);
-        when(user.getId()).thenReturn(USER_ID);
-    }
+        when(securityContext.getUserPrincipal()).thenReturn(new PrincipalImpl(email));
+        when(userDao.getByAlias(email)).thenReturn(testUser);
+        when(userDao.getById(id)).thenReturn(testUser);
+        com.codenvy.commons.env.EnvironmentContext.getCurrent().setUser(new com.codenvy.commons.user.User() {
 
-    @AfterMethod
-    public void tearDown() throws Exception {
-    }
+            @Override
+            public String getName() {
+                return testUser.getEmail();
+            }
 
-    @Test
-    public void shouldBeAbleToGETCurrentProfile() throws Exception {
-        // given
-        when(userProfileDao.getById(USER_ID)).thenReturn(new Profile());
+            @Override
+            public boolean isMemberOf(String s) {
+                return false;
+            }
 
-        String[] s = getRoles(UserProfileService.class, "getCurrent");
-        for (String one : s) {
-            prepareSecurityContext(one);
-            ContainerResponse response = launcher.service("GET",
-                                                          SERVICE_PATH,
-                                                          BASE_URI,
-                                                          null,
-                                                          JsonHelper.toJson(DtoFactory.getInstance().createDto(ProfileDescriptor.class))
-                                                                    .getBytes(),
-                                                          null,
-                                                          environmentContext);
+            @Override
+            public String getToken() {
+                return null;
+            }
 
-            assertEquals(response.getStatus(), Status.OK.getStatusCode());
-            ProfileDescriptor responseProfile = (ProfileDescriptor)response.getEntity();
-            verifyLinksRel(responseProfile.getLinks(), getRels(one));
-        }
-    }
+            @Override
+            public String getId() {
+                return testUser.getId();
+            }
 
-    @Test
-    public void shouldBeAbleToGetCurrentProfileWithFilter() throws Exception {
-        Map<String, String> prefs = new HashMap<>(4);
-        prefs.put("first", "first_value");
-        prefs.put("____firstASD", "other_first_value");
-        prefs.put("second", "second_value");
-        prefs.put("other", "other_value");
-        when(userProfileDao.getById(USER_ID, "first")).thenReturn(new Profile().withPreferences(prefs));
-        prepareSecurityContext("user");
-
-        ContainerResponse response = launcher.service("GET",
-                                                      SERVICE_PATH + "?filter=first",
-                                                      BASE_URI,
-                                                      null,
-                                                      null,
-                                                      null,
-                                                      environmentContext);
-
-        assertEquals(response.getStatus(), Status.OK.getStatusCode());
-        ProfileDescriptor current = (ProfileDescriptor)response.getEntity();
-        verifyLinksRel(current.getLinks(), getRels("user"));
+            @Override
+            public boolean isTemporary() {
+                return false;
+            }
+        });
     }
 
     @Test
-    public void shouldBeAbleToRemovePreferences() throws Exception {
-        Map<String, String> prefs = new HashMap<>(Collections.singletonMap("ssh_key", "value"));
-        Profile profile = new Profile().withId(USER_ID)
-                                       .withPreferences(prefs);
-        when(userProfileDao.getById(USER_ID)).thenReturn(profile);
-        Map<String, List<String>> headers = new HashMap<>(1);
-        headers.put("Content-Type", Arrays.asList("application/json"));
+    public void shouldBeAbleToGetCurrentProfile() throws Exception {
+        final Profile current = new Profile().withId(testUser.getId()).withUserId(testUser.getId());
+        when(profileDao.getById(current.getId())).thenReturn(current);
 
-        ContainerResponse response = launcher.service("DELETE",
-                                                      SERVICE_PATH + "/prefs",
-                                                      BASE_URI,
-                                                      headers,
-                                                      JsonHelper.toJson(Arrays.asList("ssh_key")).getBytes(),
-                                                      null,
-                                                      environmentContext);
+        final ContainerResponse response = makeRequest("GET", SERVICE_PATH, null);
 
-        assertEquals(response.getStatus(), Status.NO_CONTENT.getStatusCode());
-        verify(userProfileDao, times(1)).update(any(Profile.class));
-        assertEquals(prefs.size(), 0);
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        final ProfileDescriptor descriptor = (ProfileDescriptor)response.getEntity();
+        assertEquals(descriptor.getId(), current.getId());
+        assertEquals(descriptor.getUserId(), current.getUserId());
+        assertEquals(descriptor.getAttributes().get("email"), testUser.getEmail());
+    }
+
+    @Test
+    public void shouldBeAbleToGetPreferences() throws Exception {
+        final Map<String, String> preferences = new HashMap<>(8);
+        preferences.put("test1", "test1");
+        preferences.put("test2", "test2");
+        preferences.put("test3", "test3");
+        when(preferenceDao.getPreferences(testUser.getId())).thenReturn(preferences);
+
+        final ContainerResponse response = makeRequest("GET", SERVICE_PATH + "/prefs", null);
+
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        assertEquals(response.getEntity(), preferences);
     }
 
     @Test
     public void shouldBeAbleToRemoveAttributes() throws Exception {
-        Map<String, String> attributes = new HashMap<>(3);
+        final Map<String, String> attributes = new HashMap<>(8);
         attributes.put("test", "test");
         attributes.put("test1", "test");
         attributes.put("test2", "test");
-        Profile profile = new Profile().withId(USER_ID)
-                                       .withAttributes(attributes);
-        when(userProfileDao.getById(USER_ID)).thenReturn(profile);
-        Map<String, List<String>> headers = new HashMap<>(1);
-        headers.put("Content-Type", Arrays.asList("application/json"));
+        final Profile profile = new Profile().withId(testUser.getId()).withAttributes(attributes);
+        when(profileDao.getById(profile.getId())).thenReturn(profile);
 
-        ContainerResponse response = launcher.service("DELETE",
-                                                      SERVICE_PATH + "/attributes",
-                                                      BASE_URI,
-                                                      headers,
-                                                      JsonHelper.toJson(Arrays.asList("test", "test2")).getBytes(),
-                                                      null,
-                                                      environmentContext);
+        final ContainerResponse response = makeRequest("DELETE", SERVICE_PATH + "/attributes", asList("test", "test2"));
 
-        assertEquals(response.getStatus(), Status.NO_CONTENT.getStatusCode());
-        verify(userProfileDao, times(1)).update(any(Profile.class));
+        assertEquals(response.getStatus(), NO_CONTENT.getStatusCode());
+        verify(profileDao, times(1)).update(profile);
         assertEquals(attributes.size(), 1);
-        assertEquals(attributes.get("test1"), "test");
+        assertNotNull(attributes.get("test1"));
     }
 
     @Test
-    public void shouldBeAbleToUpdateCurrentProfilePrefs() throws Exception {
-        // given
-        when(userProfileDao.getById(USER_ID)).thenReturn(new Profile().withUserId(USER_ID));
-
-        Map<String, List<String>> headers = new HashMap<>();
-
-        headers.put("Content-Type", Arrays.asList("application/json"));
-        Map<String, String> prefsToUpdate = new HashMap<>();
-        prefsToUpdate.put("second", "second_value");
-        prefsToUpdate.put("other", "other_value");
-        String[] s = getRoles(UserProfileService.class, "updatePreferences");
-        for (String one : s) {
-            prepareSecurityContext(one);
-            ContainerResponse response = launcher.service("POST",
-                                                          SERVICE_PATH + "/prefs",
-                                                          BASE_URI,
-                                                          headers,
-                                                          JsonHelper.toJson(prefsToUpdate).getBytes(),
-                                                          null,
-                                                          environmentContext);
-
-            assertEquals(response.getStatus(), Status.OK.getStatusCode());
-            ProfileDescriptor responseProfile = (ProfileDescriptor)response.getEntity();
-            assertEquals(responseProfile.getPreferences(), prefsToUpdate);
-            verifyLinksRel(responseProfile.getLinks(), getRels(one));
-        }
-        verify(userProfileDao, times(s.length)).update(any(Profile.class));
-    }
-
-    @Test
-    public void shouldBeAbleToGETProfileById() throws Exception {
-        ProfileDescriptor profile = DtoFactory.getInstance().createDto(ProfileDescriptor.class)
-                                              .withId(USER_ID)
-                                              .withUserId(USER_ID);
-        when(userProfileDao.getById(USER_ID)).thenReturn(new Profile().withId(USER_ID)
-                                                                      .withUserId(USER_ID));
-        when(userDao.getById(USER_ID)).thenReturn(user);
-
-        String[] s = getRoles(UserProfileService.class, "getById");
-        for (String one : s) {
-            prepareSecurityContext(one);
-
-            ContainerResponse response =
-                    launcher.service("GET", SERVICE_PATH + "/" + USER_ID, BASE_URI, null,
-                                     JsonHelper.toJson(profile).getBytes(), null,
-                                     environmentContext);
-
-            assertEquals(response.getStatus(), Status.OK.getStatusCode());
-            ProfileDescriptor responseProfile = (ProfileDescriptor)response.getEntity();
-            verifyLinksRel(responseProfile.getLinks(), getRels(one));
-        }
-    }
-
-
-    @Test
-    public void shouldBeAbleToUpdateCurrentProfile() throws Exception {
-        // given
-        when(userProfileDao.getById(USER_ID)).thenReturn(new Profile().withId(USER_ID));
-        Map<String, String> attributes = new HashMap<>(1);
+    public void shouldRemoveAllAttributesIfNullWasSent() throws Exception {
+        final Map<String, String> attributes = new HashMap<>(8);
         attributes.put("test", "test");
-        Map<String, List<String>> headers = new HashMap<>();
-        headers.put("Content-Type", Arrays.asList("application/json"));
+        attributes.put("test1", "test");
+        attributes.put("test2", "test");
+        final Profile profile = new Profile().withId(testUser.getId()).withAttributes(attributes);
+        when(profileDao.getById(profile.getId())).thenReturn(profile);
 
-        String[] s = getRoles(UserProfileService.class, "updateCurrent");
-        for (String one : s) {
-            prepareSecurityContext(one);
-            ContainerResponse response = launcher.service("POST",
-                                                          SERVICE_PATH,
-                                                          BASE_URI,
-                                                          headers,
-                                                          JsonHelper.toJson(attributes).getBytes(),
-                                                          null,
-                                                          environmentContext);
+        final ContainerResponse response = makeRequest("DELETE", SERVICE_PATH + "/attributes", null);
 
-            assertEquals(response.getStatus(), Status.OK.getStatusCode());
-            verify(userProfileDao, times(1)).update(any(Profile.class));
-            ProfileDescriptor responseProfile = (ProfileDescriptor)response.getEntity();
-            assertEquals(responseProfile.getAttributes(), attributes);
-            verifyLinksRel(responseProfile.getLinks(), getRels(one));
-        }
+        assertEquals(response.getStatus(), NO_CONTENT.getStatusCode());
+        verify(profileDao, times(1)).update(profile);
+        assertTrue(attributes.isEmpty());
     }
 
     @Test
-    public void shouldBeAbleToUpdateProfileByID() throws Exception {
-        // given
-        when(userProfileDao.getById(USER_ID)).thenReturn(new Profile().withId(USER_ID));
-        when(userDao.getById(anyString())).thenReturn(user);
-        Map<String, List<String>> headers = new HashMap<>();
-        headers.put("Content-Type", Arrays.asList("application/json"));
+    public void gogogo() throws JsonParseException {
+        Map<String, String> map = singletonMap("a", "value");
+        String mapJson = JsonHelper.toJson(map);
+        TypeToken token = new TypeToken<Map<String, String>>() {};
+        Map<String, String> res = JsonHelper.<Map<String, String>>fromJson(mapJson, token.getRawType(), token.getType());
 
-        Map<String, String> attributes = new HashMap<>(1);
-        attributes.put("test", "test");
-
-        String[] s = getRoles(UserProfileService.class, "update");
-        for (String one : s) {
-            prepareSecurityContext(one);
-            ContainerResponse response =
-                    launcher.service("POST", SERVICE_PATH + "/" + USER_ID, BASE_URI, headers,
-                                     JsonHelper.toJson(attributes).getBytes(), null,
-                                     environmentContext);
-
-            assertEquals(response.getStatus(), Status.OK.getStatusCode());
-            ProfileDescriptor responseProfile = (ProfileDescriptor)response.getEntity();
-            assertEquals(responseProfile.getAttributes(), attributes);
-            verifyLinksRel(responseProfile.getLinks(), getRels(one));
-        }
-        verify(userProfileDao, times(s.length)).update(any(Profile.class));
+        assertEquals(res.get("a"), "value");
     }
 
+    @Test
+    public void shouldBeAbleToUpdatePreferences() throws Exception {
+        final Map<String, String> preferences = new HashMap<>(8);
+        preferences.put("test1", "test1");
+        preferences.put("test2", "test2");
+        preferences.put("test3", "test3");
+        when(preferenceDao.getPreferences(testUser.getId())).thenReturn(preferences);
+        final Map<String, String> update = singletonMap("test1", "new_value");
 
-    protected void verifyLinksRel(List<Link> links, List<String> rels) {
-        assertEquals(links.size(), rels.size());
-        for (String rel : rels) {
-            boolean linkPresent = false;
-            for (Link link : links) {
-                linkPresent |= link.getRel().equals(rel);
-            }
-            if (!linkPresent) {
-                fail(String.format("Given links do not contain link with rel = %s", rel));
-            }
-        }
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/prefs", update);
+
+        preferences.putAll(update);
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        assertEquals(response.getEntity(), preferences);
+        verify(preferenceDao).setPreferences(testUser.getId(), preferences);
     }
 
-    private String[] getRoles(Class<? extends Service> clazz, String methodName) {
-        for (Method one : clazz.getMethods()) {
-            if (one.getName().equals(methodName)) {
-                if (one.isAnnotationPresent(RolesAllowed.class)) {
-                    return one.getAnnotation(RolesAllowed.class).value();
-                } else {
-                    return new String[0];
-                }
-            }
-        }
-        throw new IllegalArgumentException(
-                String.format("Class %s does not have method with name %s", clazz.getName(), methodName));
+    @Test
+    public void shouldThrowExceptionIfPreferencesUpdateIsNull() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/prefs", null);
+
+        assertEquals(response.getStatus(), 409);
     }
 
-    private List<String> getRels(String role) {
-        List<String> result = new ArrayList<>();
-        result.add(Constants.LINK_REL_GET_CURRENT_USER_PROFILE);
-        result.add(Constants.LINK_REL_UPDATE_CURRENT_USER_PROFILE);
-        result.add(Constants.LINK_REL_UPDATE_PREFERENCES);
-        switch (role) {
-            case "system/admin":
-            case "system/manager":
-                result.add(Constants.LINK_REL_GET_USER_PROFILE_BY_ID);
-                result.add(Constants.LINK_REL_UPDATE_USER_PROFILE_BY_ID);
-                break;
+    @Test
+    public void shouldThrowExceptionIfPreferencesUpdateIsEmpty() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/prefs", emptyMap());
 
-            default:
-                break;
-        }
-        return result;
+        assertEquals(response.getStatus(), 409);
     }
 
-    protected void prepareSecurityContext(String... roles) {
-        when(securityContext.isUserInRole(anyString())).thenReturn(false);
+    @Test
+    public void shouldBeAbleToRemovePreferences() throws Exception {
+        final Map<String, String> preferences = new HashMap<>(8);
+        preferences.put("test1", "test1");
+        preferences.put("test2", "test2");
+        preferences.put("test3", "test3");
+        when(preferenceDao.getPreferences(testUser.getId())).thenReturn(preferences);
+
+        final ContainerResponse response = makeRequest("DELETE", SERVICE_PATH + "/prefs", singletonList("test1"));
+
+        assertEquals(response.getStatus(), NO_CONTENT.getStatusCode());
+        assertNull(preferences.get("test1"));
+        verify(preferenceDao).setPreferences(testUser.getId(), preferences);
+    }
+
+    @Test
+    public void shouldRemoveAllPreferencesIfNullWasSend() throws Exception {
+        final ContainerResponse response = makeRequest("DELETE", SERVICE_PATH + "/prefs", null);
+
+        assertEquals(response.getStatus(), NO_CONTENT.getStatusCode());
+        verify(preferenceDao).remove(testUser.getId());
+    }
+
+    @Test
+    public void shouldBeAbleToGetProfileById() throws Exception {
+        final Profile profile = new Profile().withId(testUser.getId())
+                                             .withUserId(testUser.getId());
+        when(profileDao.getById(profile.getId())).thenReturn(profile);
+
+        final ContainerResponse response = makeRequest("GET", SERVICE_PATH + "/" + profile.getId(), null);
+
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        final ProfileDescriptor descriptor = (ProfileDescriptor)response.getEntity();
+        assertEquals(descriptor.getUserId(), profile.getId());
+        assertEquals(descriptor.getId(), profile.getId());
+        assertEquals(descriptor.getAttributes().get("email"), testUser.getEmail());
+    }
+
+    @Test
+    public void shouldBeAbleToUpdateCurrentProfileAttributes() throws Exception {
+        final Profile profile = new Profile().withId(testUser.getId())
+                                             .withAttributes(new HashMap<>(singletonMap("existed", "old")));
+        when(profileDao.getById(profile.getId())).thenReturn(profile);
+        final Map<String, String> attributes = new HashMap<>(4);
+        attributes.put("existed", "new");
+        attributes.put("new", "value");
+
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH, attributes);
+
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        verify(profileDao, times(1)).update(profile);
+        assertEquals(((ProfileDescriptor)response.getEntity()).getAttributes(), attributes);
+    }
+
+    @Test
+    public void shouldThrowExceptionIfAttributesUpdateForCurrentProfileIsNull() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH, null);
+
+        assertEquals(response.getStatus(), 409);
+    }
+
+    @Test
+    public void shouldThrowExceptionIfAttributesUpdateForCurrentProfileIsEmpty() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH, emptyMap());
+
+        assertEquals(response.getStatus(), 409);
+    }
+
+    @Test
+    public void shouldThrowExceptionIfAttributesUpdateForSpecificProfileIsNull() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/any_profile_id", null);
+
+        assertEquals(response.getStatus(), 409);
+    }
+
+    @Test
+    public void shouldThrowExceptionIfAttributesUpdateForSpecificProfileIsEmpty() throws Exception {
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/any_profile_id", emptyMap());
+
+        assertEquals(response.getStatus(), 409);
+    }
+
+    @Test
+    public void shouldBeAbleToUpdateProfileById() throws Exception {
+        final Profile profile = new Profile().withId(testUser.getId())
+                                             .withUserId(testUser.getId())
+                                             .withAttributes(new HashMap<>(singletonMap("existed", "old")));
+        when(profileDao.getById(testUser.getId())).thenReturn(profile);
+        final Map<String, String> attributes = new HashMap<>(4);
+        attributes.put("existed", "new");
+        attributes.put("new", "value");
+
+        final ContainerResponse response = makeRequest("POST", SERVICE_PATH + "/" + profile.getId(), attributes);
+
+        assertEquals(response.getStatus(), OK.getStatusCode());
+        assertEquals(((ProfileDescriptor)response.getEntity()).getAttributes(), attributes);
+        verify(profileDao, times(1)).update(profile);
+    }
+
+    @Test
+    public void testLinksForUser() {
+        final Profile profile = new Profile().withId(testUser.getId());
         when(securityContext.isUserInRole("user")).thenReturn(true);
-        for (String role : roles)
-            when(securityContext.isUserInRole(role)).thenReturn(true);
+
+        final Set<String> expectedRels = new HashSet<>(asList(LINK_REL_GET_CURRENT_USER_PROFILE,
+                                                              LINK_REL_UPDATE_CURRENT_USER_PROFILE,
+                                                              LINK_REL_GET_USER_PROFILE_BY_ID,
+                                                              LINK_REL_UPDATE_PREFERENCES));
+
+        assertEquals(asRels(service.toDescriptor(profile, securityContext).getLinks()), expectedRels);
+    }
+
+    @Test
+    public void testLinksForSystemAdmin() {
+        final Profile profile = new Profile().withId(testUser.getId());
+        when(securityContext.isUserInRole("system/admin")).thenReturn(true);
+
+        final Set<String> expectedRels = new HashSet<>(asList(LINK_REL_UPDATE_USER_PROFILE_BY_ID,
+                                                              LINK_REL_GET_USER_PROFILE_BY_ID));
+
+        assertEquals(asRels(service.toDescriptor(profile, securityContext).getLinks()), expectedRels);
+    }
+
+    @Test
+    public void testLinksForSystemManager() {
+        final Profile profile = new Profile().withId(testUser.getId());
+        when(securityContext.isUserInRole("system/manager")).thenReturn(true);
+
+        assertEquals(asRels(service.toDescriptor(profile, securityContext).getLinks()), singleton(LINK_REL_GET_USER_PROFILE_BY_ID));
+    }
+
+    private Set<String> asRels(List<Link> links) {
+        final Set<String> rels = new HashSet<>();
+        for (Link link : links) {
+            rels.add(link.getRel());
+        }
+        return rels;
+    }
+
+    private ContainerResponse makeRequest(String method, String path, Object entity) throws Exception {
+        Map<String, List<String>> headers = null;
+        byte[] data = null;
+        if (entity != null) {
+            headers = new HashMap<>();
+            headers.put("Content-Type", singletonList("application/json"));
+            data = JsonHelper.toJson(entity).getBytes();
+        }
+        return launcher.service(method, path, BASE_URI, headers, data, null, environmentContext);
     }
 }

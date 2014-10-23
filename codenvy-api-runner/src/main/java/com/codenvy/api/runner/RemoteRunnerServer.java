@@ -31,14 +31,23 @@ import java.util.List;
  * @author andrew00x
  */
 public class RemoteRunnerServer extends RemoteServiceDescriptor {
-
     /** Name of IDE workspace this server is used for. */
     private String assignedWorkspace;
     /** Name of project inside IDE workspace this server is used for. */
     private String assignedProject;
 
+    private String infra = "community";
+
     public RemoteRunnerServer(String baseUrl) {
         super(baseUrl);
+    }
+
+    public String getInfra() {
+        return infra;
+    }
+
+    public void setInfra(String infra) {
+        this.infra = infra;
     }
 
     public String getAssignedWorkspace() {
@@ -63,7 +72,7 @@ public class RemoteRunnerServer extends RemoteServiceDescriptor {
 
     public RemoteRunner getRemoteRunner(String name) throws RunnerException {
         try {
-            for (RunnerDescriptor runnerDescriptor : getAvailableRunners()) {
+            for (RunnerDescriptor runnerDescriptor : getRunnerDescriptors()) {
                 if (name.equals(runnerDescriptor.getName())) {
                     return new RemoteRunner(baseUrl, runnerDescriptor, getLinks());
                 }
@@ -76,7 +85,7 @@ public class RemoteRunnerServer extends RemoteServiceDescriptor {
         throw new RunnerException(String.format("Invalid runner name %s", name));
     }
 
-    public RemoteRunner createRemoteRunner(RunnerDescriptor descriptor) throws RunnerException {
+    RemoteRunner createRemoteRunner(RunnerDescriptor descriptor) throws RunnerException {
         try {
             return new RemoteRunner(baseUrl, descriptor, getLinks());
         } catch (IOException e) {
@@ -86,7 +95,7 @@ public class RemoteRunnerServer extends RemoteServiceDescriptor {
         }
     }
 
-    public List<RunnerDescriptor> getAvailableRunners() throws RunnerException {
+    public List<RunnerDescriptor> getRunnerDescriptors() throws RunnerException {
         try {
             final Link link = getLink(Constants.LINK_REL_AVAILABLE_RUNNERS);
             if (link == null) {

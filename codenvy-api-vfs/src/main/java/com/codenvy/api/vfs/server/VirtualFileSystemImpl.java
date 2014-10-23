@@ -107,27 +107,27 @@ public abstract class VirtualFileSystemImpl implements VirtualFileSystem {
         return fromVirtualFile(virtualFileCopy, false, PropertyFilter.ALL_FILTER);
     }
 
-    @Path("clone/{id}")
+    @Path("clone")
     @Override
-    public void clone(@PathParam("id") String id,
-                      @QueryParam("vfsId") String vfsId,
-                      @QueryParam("parentId") String parentId,
+    public Item clone(@QueryParam("srcPath") String srcPath,
+                      @QueryParam("srcVfsId") String srcVfsId,
+                      @QueryParam("parentPath") String parentPath,
                       @QueryParam("name") String name) throws NotFoundException, ForbiddenException, ConflictException, ServerException {
-        final VirtualFile item = mountPoint.getVirtualFileById(id);
-        final VirtualFile destination = vfsRegistry.getProvider(vfsId).getMountPoint(true).getVirtualFileById(parentId);
+        final VirtualFile item = vfsRegistry.getProvider(srcVfsId).getMountPoint(true).getVirtualFile(srcPath);
+        final VirtualFile destination = mountPoint.getVirtualFile(parentPath);
         if (!destination.isFolder()) {
             throw new ForbiddenException("Unable to perform cloning. Item specified as parent is not a folder.");
         }
-        doClone(item, destination, name);
+        return fromVirtualFile(clone(item, destination, name), false, PropertyFilter.ALL_FILTER);
     }
 
-    private void doClone(VirtualFile item, VirtualFile destination, String name)
+    public static VirtualFile clone(VirtualFile item, VirtualFile destination, String name)
             throws ForbiddenException, ConflictException, ServerException {
         if (item.isFile()) {
             InputStream input = null;
             try {
                 input = item.getContent().getStream();
-                destination.createFile(name != null ? name : item.getName(), item.getMediaType(), input);
+                return destination.createFile(name != null ? name : item.getName(), item.getMediaType(), input);
             } finally {
                 if (input != null) {
                     try {
@@ -140,8 +140,9 @@ public abstract class VirtualFileSystemImpl implements VirtualFileSystem {
             final VirtualFile newFolder = destination.createFolder(name != null ? name : item.getName());
             final LazyIterator<VirtualFile> children = item.getChildren(VirtualFileFilter.ALL);
             while (children.hasNext()) {
-                doClone(children.next(), newFolder, null);
+                clone(children.next(), newFolder, null);
             }
+            return newFolder;
         }
     }
 
@@ -149,10 +150,16 @@ public abstract class VirtualFileSystemImpl implements VirtualFileSystem {
     @Override
     public File createFile(@PathParam("parentId") String parentId,
                            @QueryParam("name") String name,
-                           @DefaultValue(MediaType.APPLICATION_OCTET_STREAM) @HeaderParam("Content-Type") MediaType mediaType,
+                           @HeaderParam("Content-Type") MediaType mediaType,
                            InputStream content) throws NotFoundException, ForbiddenException, ConflictException, ServerException {
         final VirtualFile parent = mountPoint.getVirtualFileById(parentId);
-        final VirtualFile newVirtualFile = parent.createFile(name, mediaType != null ? mediaType.toString() : null, content);
+        // Have issue with client side. Always have Content-type header is set even if client doesn't set it.
+        // In this case have Content-type is set with "text/plain; charset=UTF-8" which isn't acceptable.
+        // Have agreement with client to send Content-type header with "application/unknown" value if client doesn't want to specify media
+        // type of new file. In this case server takes care about resolving media type of file.
+        final String mt = mediaType == null || ("application".equals(mediaType.getType()) && "unknown".equals(mediaType.getSubtype()))
+                          ? null : mediaType.getType() + '/' + mediaType.getSubtype();
+        final VirtualFile newVirtualFile = parent.createFile(name, mt, content);
         return (File)fromVirtualFile(newVirtualFile, false, PropertyFilter.ALL_FILTER);
     }
 
@@ -520,7 +527,13 @@ public abstract class VirtualFileSystemImpl implements VirtualFileSystem {
             @DefaultValue(MediaType.APPLICATION_OCTET_STREAM) @HeaderParam("Content-Type") MediaType mediaType,
             InputStream newContent,
             @QueryParam("lockToken") String lockToken) throws NotFoundException, ForbiddenException, ServerException {
-        mountPoint.getVirtualFileById(id).updateContent(mediaType != null ? mediaType.toString() : null, newContent, lockToken);
+        // Have issue with client side. Always have Content-type header is set even if client doesn't set it.
+        // In this case have Content-type is set with "text/plain; charset=UTF-8" which isn't acceptable.
+        // Have agreement with client to send Content-type header with "application/unknown" value if client doesn't want to specify media
+        // type of new file. In this case server takes care about resolving media type of file.
+        final String mt = mediaType == null || ("application".equals(mediaType.getType()) && "unknown".equals(mediaType.getSubtype()))
+                          ? null : mediaType.getType() + '/' + mediaType.getSubtype();
+        mountPoint.getVirtualFileById(id).updateContent(mt, newContent, lockToken);
     }
 
     @Path("item/{id}")
@@ -775,10 +788,14 @@ public abstract class VirtualFileSystemImpl implements VirtualFileSystem {
                 mediaType = contentItem.getContentType();
             }
 
+            if (mediaType != null) {
+                final MediaType mediaTypeType = MediaType.valueOf(mediaType);
+                mediaType = mediaTypeType.getType() + '/' + mediaTypeType.getSubtype();
+            }
+
             try {
                 try {
-                    parent.createFile(name, mediaType == null ? MediaType.APPLICATION_OCTET_STREAM : mediaType,
-                                      contentItem.getInputStream());
+                    parent.createFile(name, mediaType, contentItem.getInputStream());
                 } catch (ConflictException e) {
                     if (!overwrite) {
                         throw new ConflictException("Unable upload file. Item with the same name exists. ");

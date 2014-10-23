@@ -82,12 +82,8 @@ public class RemoteServiceDescriptor {
     }
 
     public Link getLink(String rel) throws ServerException, IOException {
-        for (Link link : getServiceDescriptor().getLinks()) {
-            if (rel.equals(link.getRel())) {
-                return DtoFactory.getInstance().clone(link);
-            }
-        }
-        return null;
+        final Link link = getServiceDescriptor().getLink(rel);
+        return link == null ? null : DtoFactory.getInstance().clone(link);
     }
 
     public ServiceDescriptor getServiceDescriptor() throws IOException, ServerException {

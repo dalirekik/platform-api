@@ -16,11 +16,11 @@
     <parent>
         <artifactId>codenvy-platform-api-parent</artifactId>
         <groupId>com.codenvy.platform-api</groupId>
-        <version>0.25.0-SNAPSHOT</version>
+        <version>0.27.0-SNAPSHOT</version>
     </parent>
     <artifactId>codenvy-api-builder</artifactId>
     <packaging>jar</packaging>
-    <name>Codenvy Builder API</name>
+    <name>Codenvy API Builder</name>
     <properties>
         <dto-generator-out-directory>${project.build.directory}/generated-sources/dto/</dto-generator-out-directory>
     </properties>
@@ -44,6 +44,11 @@
             <groupId>com.codenvy.platform-api</groupId>
             <artifactId>codenvy-api-workspace</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wordnik</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>${com.wordnik.swagger.version}</version>
         </dependency>
         <dependency>
             <groupId>org.everrest</groupId>

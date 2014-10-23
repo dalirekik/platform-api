@@ -10,6 +10,7 @@
  *******************************************************************************/
 package com.codenvy.api.project.shared.dto;
 
+import com.codenvy.api.core.rest.shared.dto.Hyperlinks;
 import com.codenvy.api.core.rest.shared.dto.Link;
 import com.codenvy.dto.shared.DTO;
 
@@ -19,8 +20,7 @@ import java.util.List;
  * @author andrew00x
  */
 @DTO
-public interface ItemReference {
-
+public interface ItemReference extends Hyperlinks {
     /** Get name of item. */
     String getName();
 
@@ -29,10 +29,10 @@ public interface ItemReference {
 
     ItemReference withName(String name);
 
-    /** Get type of item, e.g. "file" or "folder". */
+    /** Get type of item, e.g. "file", "folder" or "project". */
     String getType();
 
-    /** Set type of item, e.g. "file" or "folder". */
+    /** Set type of item, e.g. "file" or "folder" or "project". */
     void setType(String type);
 
     ItemReference withType(String type);
@@ -53,15 +53,5 @@ public interface ItemReference {
 
     ItemReference withPath(String path);
 
-    boolean getHasChildFiles();
-
-    void setHasChildFiles(boolean hasChildFiles);
-
-    ItemReference withHasChildFiles(boolean hasChildFiles);
-
-    List<Link> getLinks();
-
     ItemReference withLinks(List<Link> links);
-
-    void setLinks(List<Link> links);
 }

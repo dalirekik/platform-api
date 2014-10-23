@@ -24,11 +24,15 @@ public interface ProjectTemplateDescriptor {
 
     ProjectTemplateDescriptor withCategory(String category);
 
+    //
+
     ImportSourceDescriptor getSource();
 
     void setSource(ImportSourceDescriptor sources);
 
     ProjectTemplateDescriptor withSource(ImportSourceDescriptor sources);
+
+    //
 
     /** Get display name of project template. */
     String getDisplayName();
@@ -38,6 +42,8 @@ public interface ProjectTemplateDescriptor {
 
     ProjectTemplateDescriptor withDisplayName(String displayName);
 
+    //
+
     /** Get description of project template. */
     String getDescription();
 
@@ -45,4 +51,24 @@ public interface ProjectTemplateDescriptor {
     void setDescription(String description);
 
     ProjectTemplateDescriptor withDescription(String description);
+
+    //
+
+    /** Gets builder configurations. */
+    BuildersDescriptor getBuilders();
+
+    /** Sets builder configurations. */
+    void setBuilders(BuildersDescriptor builders);
+
+    ProjectTemplateDescriptor withBuilders(BuildersDescriptor builders);
+
+    //
+
+    /** Gets runner configurations. */
+    RunnersDescriptor getRunners();
+
+    /** Sets runner configurations. */
+    void setRunners(RunnersDescriptor runners);
+
+    ProjectTemplateDescriptor withRunners(RunnersDescriptor runners);
 }

@@ -12,10 +12,6 @@ package com.codenvy.api.builder.internal;
 
 /** @author andrew00x */
 public class Constants {
-    // properties of project which are interesting for builder
-    public static final String BUILDER_NAME                        = "builder.name";
-    public static final String BUILDER_TARGETS                     = "builder.${builder}.targets";
-    public static final String BUILDER_OPTIONS                     = "builder.${builder}.options";
     // rels for known builder links
     public static final String LINK_REL_REGISTER_BUILDER_SERVICE   = "register builder service";
     public static final String LINK_REL_UNREGISTER_BUILDER_SERVICE = "unregister builder service";
@@ -75,10 +71,6 @@ public class Constants {
     public static final String CLEANUP_RESULT_TIME = KEEP_RESULT_TIME;
     /** @deprecated use {@link #QUEUE_SIZE} */
     public static final String INTERNAL_QUEUE_SIZE = QUEUE_SIZE;
-    /** @deprecated user {@link #WAITING_TIME} */
-    public static final String MAX_TIME_IN_QUEUE   = WAITING_TIME;
-    /** @deprecated use {@link #MAX_EXECUTION_TIME} */
-    public static final String BUILD_TIMEOUT       = MAX_EXECUTION_TIME;
 
     // attributes of workspace which are interested for builder
     public static final String BUILDER_EXECUTION_TIME = "codenvy:builder_execution_time";

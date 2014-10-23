@@ -30,6 +30,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Wraps RemoteRunnerProcess.
@@ -43,6 +45,7 @@ public final class RunQueueTask implements Cancellable {
     private final ValueHolder<BuildTaskDescriptor> buildTaskHolder;
     private final long                             created;
     private final long                             waitingTimeout;
+    private final AtomicBoolean                    stopped = new AtomicBoolean(false);
 
     /* NOTE: don't use directly! Always use getter that makes copy of this UriBuilder. */
     private final UriBuilder uriBuilder;
@@ -84,7 +87,12 @@ public final class RunQueueTask implements Cancellable {
     public ApplicationProcessDescriptor getDescriptor() throws RunnerException, NotFoundException {
         final DtoFactory dtoFactory = DtoFactory.getInstance();
         ApplicationProcessDescriptor descriptor;
-        if (future.isCancelled()) {
+        if (isStopped()) {
+            descriptor = dtoFactory.createDto(ApplicationProcessDescriptor.class)
+                                   .withProcessId(id)
+                                   .withCreationTime(created)
+                                   .withStatus(ApplicationStatus.STOPPED);
+        } else if (future.isCancelled()) {
             descriptor = dtoFactory.createDto(ApplicationProcessDescriptor.class)
                                    .withProcessId(id)
                                    .withCreationTime(created)
@@ -104,10 +112,15 @@ public final class RunQueueTask implements Cancellable {
                                                              .build(request.getWorkspace(), id).toString())
                                     .withMethod("POST")
                                     .withProduces(MediaType.APPLICATION_JSON));
-                final List<RunnerMetric> runStats = new ArrayList<>(1);
+                final List<RunnerMetric> runStats = new ArrayList<>(2);
                 runStats.add(dtoFactory.createDto(RunnerMetric.class).withName(RunnerMetric.WAITING_TIME_LIMIT)
                                        .withValue(Long.toString(created + waitingTimeout))
-                                       .withDescription("Waiting for start limit"));
+                                       .withDescription("Waiting for start limit (ms)"));
+                final long lifetime = request.getLifetime();
+                runStats.add(dtoFactory.createDto(RunnerMetric.class).withName(RunnerMetric.LIFETIME)
+                                       .withValue(lifetime >= Integer.MAX_VALUE ? RunnerMetric.ALWAYS_ON
+                                                                                : Long.toString(TimeUnit.SECONDS.toMillis(lifetime)))
+                                       .withDescription("Application lifetime (ms)"));
                 descriptor = dtoFactory.createDto(ApplicationProcessDescriptor.class)
                                        .withProcessId(id)
                                        .withCreationTime(created)
@@ -117,7 +130,6 @@ public final class RunQueueTask implements Cancellable {
                                        .withWorkspace(request.getWorkspace())
                                        .withProject(request.getProject())
                                        .withUserName(request.getUserName());
-
             } else {
                 final ApplicationProcessDescriptor remoteDescriptor = remoteProcess.getApplicationProcessDescriptor();
                 // re-write some parameters, we are working as revers-proxy
@@ -130,13 +142,16 @@ public final class RunQueueTask implements Cancellable {
                 final List<RunnerMetric> runStats = descriptor.getRunStats();
                 runStats.add(dtoFactory.createDto(RunnerMetric.class).withName(RunnerMetric.WAITING_TIME)
                                        .withValue(Long.toString(waitingTimeMillis))
-                                       .withDescription("Waiting for start duration"));
+                                       .withDescription("Waiting for start duration (ms)"));
+                final long lifetime = request.getLifetime();
+                runStats.add(dtoFactory.createDto(RunnerMetric.class).withName(RunnerMetric.LIFETIME)
+                                       .withValue(lifetime >= Integer.MAX_VALUE ? RunnerMetric.ALWAYS_ON
+                                                                                : Long.toString(TimeUnit.SECONDS.toMillis(lifetime)))
+                                       .withDescription("Application lifetime (ms)"));
             }
-            if (buildTaskHolder != null) {
-                final BuildTaskDescriptor buildTaskDescriptor = buildTaskHolder.get();
-                if (buildTaskDescriptor != null) {
-                    descriptor.setBuildStats(buildTaskDescriptor.getBuildStats());
-                }
+            final BuildTaskDescriptor buildTaskDescriptor = buildTaskHolder.get();
+            if (buildTaskDescriptor != null) {
+                descriptor.setBuildStats(buildTaskDescriptor.getBuildStats());
             }
         }
         return descriptor;
@@ -176,12 +191,22 @@ public final class RunQueueTask implements Cancellable {
         doStop(getRemoteProcess());
     }
 
-    public boolean isCancelled() throws RunnerException {
-        return future.isCancelled();
+    public void stop() throws Exception {
+        if (stopped.compareAndSet(false, true)) {
+            cancel();
+        }
+    }
+
+    public boolean isStopped() throws RunnerException {
+        return stopped.get() || future.isCancelled();
     }
 
     public boolean isWaiting() {
         return !future.isDone();
+    }
+
+    boolean isCancelled() {
+        return future.isCancelled();
     }
 
     private void doStop(RemoteRunnerProcess remoteProcess) throws RunnerException, NotFoundException {
@@ -209,7 +234,7 @@ public final class RunQueueTask implements Cancellable {
     }
 
     RemoteRunnerProcess getRemoteProcess() throws RunnerException, NotFoundException {
-        if (!future.isDone()) {
+        if (!future.isDone() || future.isCancelled()) {
             return null;
         }
         if (myRemoteProcess == null) {

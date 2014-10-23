@@ -27,6 +27,7 @@ import com.codenvy.commons.lang.IoUtil;
 import com.codenvy.dto.server.DtoFactory;
 
 import org.testng.Assert;
+import org.testng.annotations.AfterTest;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
@@ -74,7 +75,7 @@ public class BuilderTest {
         public SourcesManager getSourcesManager() {
             return new SourcesManager() {
                 @Override
-                public void getSources(String workspace, String project, String sourcesUrl, File workDir) throws IOException {
+                public void getSources(BuildLogger logger, String workspace, String project, String sourcesUrl, File workDir) throws IOException {
                     // Don't need for current set of tests.
                 }
 
@@ -129,6 +130,7 @@ public class BuilderTest {
         builder.start();
     }
 
+    @AfterTest
     public void tearDown() {
         builder.stop();
         Assert.assertTrue(IoUtil.deleteRecursive(repo), "Unable remove test directory");
@@ -149,7 +151,7 @@ public class BuilderTest {
         buildRequest.setSourcesUrl("http://localhost/a" /* ok for test, nothing download*/);
         buildRequest.setProjectDescriptor(DtoFactory.getInstance().createDto(ProjectDescriptor.class)
                                                     .withName("my_project")
-                                                    .withProjectTypeId("my_type"));
+                                                    .withType("my_type"));
         final BuildTask task = builder.perform(buildRequest);
         waitForTask(task);
         Assert.assertEquals(builder.logger.getLogsAsString(), "test");
@@ -176,7 +178,7 @@ public class BuilderTest {
         buildRequest.setSourcesUrl("http://localhost/a" /* ok for test, nothing download*/);
         buildRequest.setProjectDescriptor(DtoFactory.getInstance().createDto(ProjectDescriptor.class)
                                                     .withName("my_project")
-                                                    .withProjectTypeId("my_type"));
+                                                    .withType("my_type"));
         final BuildTask task = builder.perform(buildRequest);
         waitForTask(task);
         Assert.assertTrue(beginFlag[0]);

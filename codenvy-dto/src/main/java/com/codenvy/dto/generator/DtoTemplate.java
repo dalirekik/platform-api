@@ -15,16 +15,12 @@
 package com.codenvy.dto.generator;
 
 import com.codenvy.dto.server.DtoFactoryVisitor;
-import com.codenvy.dto.shared.ClientToServerDto;
-import com.codenvy.dto.shared.RoutableDto;
-import com.codenvy.dto.shared.RoutingType;
-import com.codenvy.dto.shared.ServerToClientDto;
-import com.google.common.base.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,14 +28,10 @@ import java.util.Set;
 /**
  * Base template for the generated output file that contains all the DTOs.
  * <p/>
- * Note that we generate client and server DTOs in separate runs of the
- * generator.
+ * Note that we generate client and server DTOs in separate runs of the generator.
  * <p/>
- * The directionality of the DTOs only affects whether or not we expose methods
- * to construct an instance of the DTO. We need both client and server versions
- * of all DTOs (irrespective of direction), but you aren't allowed to construct
- * a new {@link ServerToClientDto} on the client. And similarly, you aren't
- * allowed to construct a {@link ClientToServerDto} on the server.
+ * The directionality of the DTOs only affects whether or not we expose methods to construct an instance of the DTO. We need both client and
+ * server versions of all DTOs (irrespective of direction).
  */
 public class DtoTemplate {
     public static class MalformedDtoInterfaceException extends RuntimeException {
@@ -49,41 +41,22 @@ public class DtoTemplate {
     }
 
     // We keep a whitelist of allowed non-DTO generic types.
-    static final Set<Class<?>> jreWhitelist = new HashSet<Class<?>>(
-            Arrays.asList(new Class<?>[]{String.class, Integer.class, Double.class, Float.class, Boolean.class}));
+    static final Set<Class<?>> jreWhitelist =
+            new HashSet<>(Arrays.asList(new Class<?>[]{String.class, Integer.class, Double.class, Float.class, Boolean.class}));
 
-    private final List<DtoImpl> dtoInterfaces = new ArrayList<DtoImpl>();
+    private final List<DtoImpl> dtoInterfaces = new ArrayList<>();
 
     // contains mapping for already implemented DTO interfaces
-    private final Map<Class<?>, Class<?>> implementedDtoInterfaces = new HashMap<Class<?>, Class<?>>();
+    private final Map<Class<?>, Set<Class<?>>> implementedDtoInterfaces = new HashMap<>();
 
     private final String packageName;
 
     private final String className;
 
-    private final boolean isServerType;
-
-    private final String apiHash;
+    private final String implType;
 
     /**
-     * @return whether or not the specified interface implements
-     *         {@link ClientToServerDto}.
-     */
-    static boolean implementsClientToServerDto(Class<?> i) {
-        return implementsInterface(i, ClientToServerDto.class);
-    }
-
-    /**
-     * @return whether or not the specified interface implements
-     *         {@link ServerToClientDto}.
-     */
-    static boolean implementsServerToClientDto(Class<?> i) {
-        return implementsInterface(i, ServerToClientDto.class);
-    }
-
-    /**
-     * Walks the superinterface hierarchy to determine if a Class implements some
-     * target interface transitively.
+     * Walks the super interface hierarchy to determine if a Class implements some target interface transitively.
      */
     static boolean implementsInterface(Class<?> i, Class<?> target) {
         if (i.equals(target)) {
@@ -99,44 +72,55 @@ public class DtoTemplate {
     }
 
     /**
-     * @return whether or not the specified interface implements
-     *         {@link RoutableDto}.
-     */
-    private static boolean implementsRoutableDto(Class<?> i) {
-        return implementsInterface(i, RoutableDto.class);
-    }
-
-    /**
      * Constructor.
      *
      * @param packageName
      *         The name of the package for the outer DTO class.
      * @param className
      *         The name of the outer DTO class.
-     * @param isServerType
-     *         Whether or not the DTO impls are client or server.
+     * @param implType
+     *         DTO impls type, "client" or "server".
      */
-    DtoTemplate(String packageName, String className, String apiHash, boolean isServerType) {
+    DtoTemplate(String packageName, String className, String implType) {
         this.packageName = packageName;
         this.className = className;
-        this.apiHash = apiHash;
-        this.isServerType = isServerType;
+        this.implType = implType;
+    }
+
+    public String getImplType() {
+        return implType;
     }
 
     public void addImplementation(Class<?> dtoInterface, Class<?> impl) {
-        implementedDtoInterfaces.put(dtoInterface, impl);
+        Set<Class<?>> classes = implementedDtoInterfaces.get(dtoInterface);
+        if (classes == null) {
+            implementedDtoInterfaces.put(dtoInterface, classes = new LinkedHashSet<>());
+        }
+        classes.add(impl);
     }
 
-    /** Some DTO interfaces may be already implemented in dependencies of current project. Try to reuse them. If this method returns
-     * <code>null</code> it means interface is not implemented yet. */
+    /**
+     * Some DTO interfaces may be already implemented in dependencies of current project. Try to reuse them. If this method returns
+     * <code>null</code> it means interface is not implemented yet.
+     */
     public Class<?> getDtoImplementation(Class<?> dtoInterface) {
-        return implementedDtoInterfaces.get(dtoInterface);
+        Set<Class<?>> classes = implementedDtoInterfaces.get(dtoInterface);
+        if (classes == null || classes.isEmpty()) {
+            return null;
+        }
+        for (Class<?> impl : classes) {
+            if (impl.getSimpleName().equals(dtoInterface.getSimpleName() + "Impl")) {
+                return impl;
+            }
+        }
+        return null;
     }
 
     /**
      * Adds an interface to the DtoTemplate for code generation.
      *
      * @param i
+     *         interface to add
      */
     public void addInterface(Class<?> i) {
         getDtoInterfaces().add(createDtoImplTemplate(i));
@@ -148,23 +132,21 @@ public class DtoTemplate {
     }
 
     /**
-     * Returns the source code for a class that contains all the DTO impls for any
-     * interfaces that were added via the {@link #addInterface(Class)} method.
+     * Returns the source code for a class that contains all the DTO impls for any interfaces that were added via the {@link
+     * #addInterface(Class)} method.
      */
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
         emitPreamble(builder);
-        emitClientFrontendApiVersion(builder);
         emitDtos(builder);
         emitPostamble(builder);
         return builder.toString();
     }
 
     /**
-     * Tests whether or not a given class is a part of our dto jar, and thus will
-     * eventually have a generated Impl that is serializable (thus allowing it to
-     * be a generic type).
+     * Tests whether or not a given class is a part of our dto jar, and thus will eventually have a generated Impl that is serializable
+     * (thus allowing it to be a generic type).
      */
     boolean isDtoInterface(Class<?> potentialDto) {
         for (DtoImpl dto : getDtoInterfaces()) {
@@ -175,19 +157,13 @@ public class DtoTemplate {
         return false;
     }
 
-    /**
-     * Will initialize the routing ID to be RoutableDto.INVALID_TYPE if it is not
-     * routable. This is a small abuse of the intent of that value, but it allows
-     * us to simply omit it from the routing type enumeration later.
-     *
-     * @param i
-     *         the super interface type
-     * @return a new DtoServerTemplate or a new DtoClientTemplate depending on
-     *         isServerImpl.
-     */
     private DtoImpl createDtoImplTemplate(Class<?> i) {
-        int routingId = implementsRoutableDto(i) ? getRoutingId(i) : RoutableDto.NON_ROUTABLE_TYPE;
-        return isServerType ? new DtoImplServerTemplate(this, routingId, i) : new DtoImplClientTemplate(this, routingId, i);
+        if ("server".equals(implType)) {
+            return new DtoImplServerTemplate(this, i);
+        } else if ("client".equals(implType)) {
+            return new DtoImplClientTemplate(this, i);
+        }
+        throw new IllegalStateException("Unsupported DTO implementation type, must be 'client' or 'server'");
     }
 
     private void emitDtos(StringBuilder builder) {
@@ -214,7 +190,7 @@ public class DtoTemplate {
         builder.append("// GENERATED SOURCE. DO NOT EDIT.\npackage ");
         builder.append(packageName);
         builder.append(";\n\n");
-        if (isServerType) {
+        if ("server".equals(implType)) {
             builder.append("import com.codenvy.dto.server.JsonSerializable;\n");
             builder.append("\n");
             builder.append("import com.google.gson.Gson;\n");
@@ -229,7 +205,7 @@ public class DtoTemplate {
             builder.append("import java.util.List;\n");
             builder.append("import java.util.Map;\n");
         }
-        if (!isServerType) {
+        if ("client".equals(implType)) {
             builder.append("import com.codenvy.ide.dto.ClientDtoFactoryVisitor;\n");
             builder.append("import com.codenvy.ide.dto.DtoFactoryVisitor;\n");
             builder.append("import com.codenvy.ide.dto.JsonSerializable;\n");
@@ -237,7 +213,7 @@ public class DtoTemplate {
             builder.append("import com.google.inject.Singleton;\n");
         }
         builder.append("\n\n@SuppressWarnings({\"unchecked\", \"cast\"})\n");
-        if (!isServerType) {
+        if ("client".equals(implType)) {
             builder.append("@Singleton\n");
             builder.append("@ClientDtoFactoryVisitor\n");
         }
@@ -245,14 +221,14 @@ public class DtoTemplate {
         // so we need not add any import statements for anything.
         builder.append("public class ");
         builder.append(className);
-        if (isServerType) {
+        if ("server".equals(implType)) {
             builder.append(" implements ").append(DtoFactoryVisitor.class.getCanonicalName());
         }
-        if (!isServerType) {
+        if ("client".equals(implType)) {
             builder.append(" implements ").append("DtoFactoryVisitor");
         }
         builder.append(" {\n\n");
-        if (isServerType) {
+        if ("server".equals(implType)) {
             builder.append("  private static final Gson gson = new GsonBuilder().disableHtmlEscaping().serializeNulls().create();\n\n");
             builder.append("  @Override\n" +
                            "  public void accept(com.codenvy.dto.server.DtoFactory dtoFactory) {\n");
@@ -279,9 +255,8 @@ public class DtoTemplate {
             }
             builder.append("  }\n\n");
         }
-        if (!isServerType) {
-            builder.append("  @Override\n" +
-                           "  public void accept(com.codenvy.ide.dto.DtoFactory dtoFactory) {\n");
+        if ("client".equals(implType)) {
+            builder.append("  @Override\n").append("  public void accept(com.codenvy.ide.dto.DtoFactory dtoFactory) {\n");
             for (DtoImpl dto : getDtoInterfaces()) {
                 String dtoInterface = dto.getDtoInterface().getCanonicalName();
                 builder.append("    dtoFactory.registerProvider(").append(dtoInterface).append(".class").append(", ")
@@ -299,32 +274,5 @@ public class DtoTemplate {
             }
             builder.append("  }\n\n");
         }
-    }
-
-    /**
-     * Emits a static variable that is the hash of all the classnames, methodnames, and return types
-     * to be used as a version hash between client and server.
-     */
-    private void emitClientFrontendApiVersion(StringBuilder builder) {
-        builder.append("\n  public static final String CLIENT_SERVER_PROTOCOL_HASH = \"");
-        builder.append(getApiHash());
-        builder.append("\";\n\n");
-    }
-
-    private String getApiHash() {
-        return apiHash;
-    }
-
-    /**
-     * Extracts the {@link RoutingType} annotation to derive the stable
-     * routing type.
-     */
-    private int getRoutingId(Class<?> i) {
-        RoutingType routingTypeAnnotation = i.getAnnotation(RoutingType.class);
-
-        Preconditions.checkNotNull(routingTypeAnnotation,
-                                   "RoutingType annotation must be specified for all subclasses of RoutableDto. " + i.getName());
-
-        return routingTypeAnnotation.type();
     }
 }

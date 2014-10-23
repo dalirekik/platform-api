@@ -10,9 +10,28 @@
  *******************************************************************************/
 package com.codenvy.api.factory;
 
-import com.codenvy.api.factory.dto.*;
+import com.codenvy.api.factory.dto.Actions;
+import com.codenvy.api.factory.dto.Author;
+import com.codenvy.api.factory.dto.Factory;
+import com.codenvy.api.factory.dto.FactoryV1_0;
+import com.codenvy.api.factory.dto.FactoryV1_1;
+import com.codenvy.api.factory.dto.FactoryV1_2;
+import com.codenvy.api.factory.dto.FactoryV2_0;
+import com.codenvy.api.factory.dto.Git;
+import com.codenvy.api.factory.dto.Policies;
+import com.codenvy.api.factory.dto.ProjectAttributes;
+import com.codenvy.api.factory.dto.Restriction;
+import com.codenvy.api.project.shared.dto.RunnerSource;
+import com.codenvy.api.project.shared.dto.Source;
+import com.codenvy.api.factory.dto.Variable;
+import com.codenvy.api.factory.dto.Workspace;
+import com.codenvy.api.project.shared.dto.ImportSourceDescriptor;
+import com.codenvy.api.project.shared.dto.NewProject;
+import com.codenvy.api.project.shared.dto.RunnerConfiguration;
+import com.codenvy.api.project.shared.dto.RunnersDescriptor;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Convert factory to non encode url.
@@ -28,10 +47,31 @@ public abstract class NonEncodedFactoryBuilder {
      * @param factory
      *         - factory object.
      * @return - query part of url of nonencoded version
+     * @throws java.lang.RuntimeException
+     *         if v is null, empty or illegal.
      */
+    // TODO affiliateId
     public String buildNonEncoded(Factory factory) {
+        if (null == factory.getV() || factory.getV().isEmpty()) {
+            throw new RuntimeException("Factory version can't be null or empty");
+        }
         StringBuilder result = new StringBuilder();
-        buildNonEncoded(factory, result);
+        switch (factory.getV()) {
+            case "1.0":
+                buildNonEncoded((FactoryV1_0)factory, result);
+                break;
+            case "1.1":
+                buildNonEncoded((FactoryV1_1)factory, result);
+                break;
+            case "1.2":
+                buildNonEncoded((FactoryV1_2)factory, result);
+                break;
+            case "2.0":
+                buildNonEncoded((FactoryV2_0)factory, result);
+                break;
+            default:
+                throw new RuntimeException("Factory version '" + factory.getV() + "' not found");
+        }
         return result.toString();
     }
 
@@ -39,7 +79,7 @@ public abstract class NonEncodedFactoryBuilder {
     private void buildNonEncoded(FactoryV1_0 factory, StringBuilder builder) {
         builder.append("v=").append(factory.getV());
         builder.append("&vcs=").append(factory.getVcs());
-        builder.append("&vcsurl=").append(safeGwtEncode(factory.getVcsurl()));
+        builder.append("&vcsurl=").append(encode(factory.getVcsurl()));
         if (factory.getCommitid() != null) {
             builder.append("&commitid=").append(factory.getCommitid());
         }
@@ -61,8 +101,8 @@ public abstract class NonEncodedFactoryBuilder {
             builder.append("&wname=").append(factory.getWname());
         }
 
-        if (factory.getVcsinfo()) {
-            builder.append("&vcsinfo=").append(true);
+        if (factory.getVcsinfo() != null) {
+            builder.append("&vcsinfo=").append(factory.getVcsinfo());
         }
 
         if (factory.getOpenfile() != null) {
@@ -116,7 +156,7 @@ public abstract class NonEncodedFactoryBuilder {
         }
 
         if (factory.getVariables() != null && factory.getVariables().size() > 0) {
-            builder.append("&variables=").append(safeGwtEncode(safeGwtToJson(factory.getVariables())));
+            builder.append("&variables=").append(encode(toJson(factory.getVariables())));
         }
 
         if (factory.getImage() != null) {
@@ -128,13 +168,13 @@ public abstract class NonEncodedFactoryBuilder {
         buildNonEncoded(((FactoryV1_1)factory), builder);
         Restriction restriction = factory.getRestriction();
         if (restriction != null) {
-            if (restriction.getValidsince() > 0) {
+            if (restriction.getValidsince() != null && restriction.getValidsince() > 0) {
                 builder.append("&restriction.validsince=").append(restriction.getValidsince());
             }
-            if (restriction.getValiduntil() > 0) {
+            if (restriction.getValiduntil() != null && restriction.getValiduntil() > 0) {
                 builder.append("&restriction.validuntil=").append(restriction.getValiduntil());
             }
-            if (restriction.getMaxsessioncount() > 0) {
+            if (restriction.getMaxsessioncount() != null && restriction.getMaxsessioncount() > 0) {
                 builder.append("&restriction.maxsessioncount=").append(restriction.getMaxsessioncount());
             }
             if (restriction.getRefererhostname() != null) {
@@ -145,7 +185,7 @@ public abstract class NonEncodedFactoryBuilder {
                 builder.append("&restriction.password=").append(restriction.getPassword());
             }
 
-            if (restriction.getRestrictbypassword()) {
+            if (restriction.getRestrictbypassword() != null && restriction.getRestrictbypassword()) {
                 builder.append("&restriction.restrictbypassword=").append(true);
             }
         }
@@ -153,36 +193,168 @@ public abstract class NonEncodedFactoryBuilder {
         if (git != null) {
 
             if (git.getConfigbranchmerge() != null) {
-                builder.append("&git.configbranchmerge=").append(safeGwtEncode(git.getConfigbranchmerge()));
+                builder.append("&git.configbranchmerge=").append(encode(git.getConfigbranchmerge()));
             }
 
             if (git.getConfigpushdefault() != null) {
                 builder.append("&git.configpushdefault=").append(git.getConfigpushdefault());
             }
             if (git.getConfigremoteoriginfetch() != null) {
-                builder.append("&git.configremoteoriginfetch=").append(safeGwtEncode(git.getConfigremoteoriginfetch()));
+                builder.append("&git.configremoteoriginfetch=").append(encode(git.getConfigremoteoriginfetch()));
+            }
+        }
+    }
+
+    private void buildNonEncoded(FactoryV2_0 factory, StringBuilder builder) {
+        appendIfNotNull(builder, "v=", factory.getV(), false);
+        final Source source = factory.getSource();
+        if (null != source) {
+            final ImportSourceDescriptor sourceDescriptor = source.getProject();
+            if (null != sourceDescriptor) {
+                appendIfNotNull(builder, "&source.project.type=", sourceDescriptor.getType(), false);
+                appendIfNotNull(builder, "&source.project.location=", sourceDescriptor.getLocation(), true);
+                if (sourceDescriptor.getParameters() != null) {
+                    for (Map.Entry<String, String> entry : sourceDescriptor.getParameters().entrySet()) {
+                        builder.append("&source.project.parameters.")
+                               .append(encode(entry.getKey()))
+                               .append("=")
+                               .append(encode(entry.getValue()));
+                    }
+                }
+            }
+            if (source.getRunners() != null) {
+                for (Map.Entry<String, RunnerSource> runnerSource : source.getRunners().entrySet()) {
+                    final String prefix = "&source.runners." + encode(runnerSource.getKey());
+                    builder.append(prefix)
+                           .append(".location=")
+                           .append(encode(runnerSource.getValue().getLocation()));
+                    if (runnerSource.getValue().getParameters() != null) {
+                        for (Map.Entry<String, String> parameter : runnerSource.getValue().getParameters().entrySet()) {
+                            builder.append(prefix)
+                                   .append(".parameters.")
+                                   .append(encode(parameter.getKey()))
+                                   .append("=").append(encode(parameter.getValue()));
+                        }
+                    }
+                }
             }
         }
 
+        final Author creator = factory.getCreator();
+        if (creator != null) {
+            appendIfNotNull(builder, "&creator.name=", creator.getName(), true);
+            appendIfNotNull(builder, "&creator.email=", creator.getEmail(), true);
+            appendIfNotNull(builder, "&creator.accountId=", creator.getAccountId(), false);
+        }
+
+        final Workspace workspace = factory.getWorkspace();
+        if (workspace != null) {
+            appendIfNotNull(builder, "&workspace.temp=", workspace.getTemp(), false);
+            for (Map.Entry<String, String> entry : workspace.getAttributes().entrySet()) {
+                builder.append("&workspace.attributes.")
+                       .append(encode(entry.getKey()))
+                       .append("=")
+                       .append(encode(entry.getValue()));
+            }
+        }
+
+        final NewProject project = factory.getProject();
+        if (project != null) {
+            appendIfNotNull(builder, "&project.name=", project.getName(), true);
+            appendIfNotNull(builder, "&project.description=", project.getDescription(), true);
+            appendIfNotNull(builder, "&project.type=", project.getType(), true);
+            appendIfNotNull(builder, "&project.visibility=", project.getVisibility(), false);
+            if (project.getBuilders() != null) {
+                appendIfNotNull(builder, "&project.builders.default=", project.getBuilders().getDefault(), true);
+            }
+            final RunnersDescriptor rDescriptor = project.getRunners();
+            if (null != rDescriptor) {
+                appendIfNotNull(builder, "&project.runners.default=", rDescriptor.getDefault(), true);
+                if (rDescriptor.getConfigs() != null) {
+                    for (Map.Entry<String, RunnerConfiguration> rConf : rDescriptor.getConfigs().entrySet()) {
+                        final String prefix = "&project.runners.configs." + encode(rConf.getKey());
+                        if (rConf.getValue().getRam() > 0) {
+                            builder.append(prefix)
+                                   .append(".ram=")
+                                   .append(rConf.getValue().getRam());
+                        }
+                        if (rConf.getValue().getVariables() != null) {
+                            final String vPrefix = prefix + ".variables";
+                            for (Map.Entry<String, String> vars : rConf.getValue().getVariables().entrySet()) {
+                                builder.append(vPrefix)
+                                       .append(".")
+                                       .append(encode(vars.getKey()))
+                                       .append("=")
+                                       .append(encode(vars.getValue()));
+                            }
+                        }
+                        if (rConf.getValue().getOptions() != null) {
+                            final String oPrefix = prefix + ".options";
+                            for (Map.Entry<String, String> options : rConf.getValue().getOptions().entrySet()) {
+                                builder.append(oPrefix)
+                                       .append(".")
+                                       .append(encode(options.getKey()))
+                                       .append("=")
+                                       .append(encode(options.getValue()));
+                            }
+                        }
+                    }
+                }
+            }
+            if (project.getAttributes() != null) {
+                for (Map.Entry<String, List<String>> attribute : project.getAttributes().entrySet()) {
+                    final String prefix = "&project.attributes." + encode(attribute.getKey());
+                    for (String attrValue : attribute.getValue()) {
+                        builder.append(prefix)
+                               .append("=")
+                               .append(encode(attrValue));
+                    }
+                }
+            }
+        }
+
+        final Policies policies = factory.getPolicies();
+        if (policies != null) {
+            appendIfNotNull(builder, "&policies.validSince=", policies.getValidSince(), false);
+            appendIfNotNull(builder, "&policies.validUntil=", policies.getValidUntil(), false);
+            appendIfNotNull(builder, "&policies.refererHostname=", policies.getRefererHostname(), true);
+        }
+
+        final Actions actions = factory.getActions();
+        if (actions != null) {
+            appendIfNotNull(builder, "&actions.openFile=", actions.getOpenFile(), true);
+            appendIfNotNull(builder, "&actions.warnOnClose=", actions.getWarnOnClose(), false);
+            if (actions.getFindReplace() != null && !actions.getFindReplace().isEmpty()) {
+                builder.append("&actions.findReplace=")
+                       .append(encode(toJson(actions.getFindReplace())));
+            }
+        }
+    }
+
+    private void appendIfNotNull(StringBuilder sb, String key, Object value, boolean encodeValue) {
+        if (value != null) {
+            if (encodeValue) {
+                value = encode(String.valueOf(value));
+            }
+            sb.append(key).append(String.valueOf(value));
+        }
     }
 
     /**
      * Encode value to be used as a query parameter.
-     * GWT have its own implementation.
      *
      * @param value
      *         - string to encode.
      * @return - encoded value safe to use as query parameter.
      */
-    protected abstract String safeGwtEncode(String value);
+    protected abstract String encode(String value);
 
     /**
      * Convert object to json
-     * GWT have its own implementation.
      *
      * @param dto
      *         - initial object
      * @return - json representation of object.
      */
-    protected abstract String safeGwtToJson(List<Variable> dto);
+    protected abstract String toJson(List<Variable> dto);
 }

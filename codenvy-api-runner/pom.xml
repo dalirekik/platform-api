@@ -16,11 +16,11 @@
     <parent>
         <artifactId>codenvy-platform-api-parent</artifactId>
         <groupId>com.codenvy.platform-api</groupId>
-        <version>0.25.0-SNAPSHOT</version>
+        <version>0.27.0-SNAPSHOT</version>
     </parent>
     <artifactId>codenvy-api-runner</artifactId>
     <packaging>jar</packaging>
-    <name>Codenvy Runner API</name>
+    <name>Codenvy API Runner</name>
     <properties>
         <dto-generator-out-directory>${project.build.directory}/generated-sources/dto/</dto-generator-out-directory>
     </properties>
@@ -51,6 +51,11 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.wordnik</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>${com.wordnik.swagger.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.everrest</groupId>
             <artifactId>everrest-websockets</artifactId>
             <version>${org.everrest.version}</version>
@@ -66,6 +71,24 @@
             <artifactId>logback-classic</artifactId>
             <version>${ch.qos.logback.version}</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${org.mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockitong</groupId>
+            <artifactId>mockitong</artifactId>
+            <version>${org.mockitong.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>mockito-all</artifactId>
+                    <groupId>org.mockito</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.testng</groupId>

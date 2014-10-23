@@ -10,19 +10,15 @@
  *******************************************************************************/
 package com.codenvy.api.project.server;
 
-import com.codenvy.api.project.shared.Attribute;
-import com.codenvy.api.project.shared.AttributeDescription;
-import com.codenvy.api.project.shared.ProjectTemplateDescription;
-import com.codenvy.api.project.shared.ProjectType;
-import com.codenvy.api.project.shared.ProjectTypeDescription;
-
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author andrew00x
@@ -33,7 +29,7 @@ public class ProjectTypeDescriptionRegistryTest {
 
     @BeforeMethod
     public void setUp() {
-        descriptionRegistry = new ProjectTypeDescriptionRegistry();
+        descriptionRegistry = new ProjectTypeDescriptionRegistry("test/host");
     }
 
     @Test
@@ -53,8 +49,23 @@ public class ProjectTypeDescriptionRegistryTest {
             }
 
             @Override
+            public Builders getBuilders() {
+                return null;
+            }
+
+            @Override
+            public Runners getRunners() {
+                return null;
+            }
+
+            @Override
             public List<ProjectTemplateDescription> getTemplates() {
                 return Collections.emptyList();
+            }
+
+            @Override
+            public Map<String, String> getIconRegistry() {
+                return Collections.emptyMap();
             }
         });
         descriptionRegistry.registerDescription(new ProjectTypeDescriptionExtension() {
@@ -73,18 +84,72 @@ public class ProjectTypeDescriptionRegistryTest {
         Assert.assertEquals(myType.getName(), "my_type");
         Assert.assertEquals(myType.getId(), "my_type");
         Assert.assertEquals(myType.getCategory(), "my_category");
-        ProjectTypeDescription myTypeDescription = descriptionRegistry.getDescription(myType);
-        Assert.assertNotNull(myTypeDescription);
-        AttributeDescription ad = myTypeDescription.getAttributeDescription("name3");
-        Assert.assertNotNull(ad);
+        List<AttributeDescription> _attributeDescriptions = descriptionRegistry.getAttributeDescriptions(myType);
+        Assert.assertNotNull(_attributeDescriptions);
+        Assert.assertEquals(_attributeDescriptions.size(), 2);//2 because we add one more attributes for all project type @see ProjectTypeDescriptionRegistry.registerDescription
+        AttributeDescription _attributeDescription = _attributeDescriptions.get(0);
+        Assert.assertEquals(_attributeDescription.getName(), "name3");
+        Assert.assertEquals(_attributeDescription.getDescription(), "description3");
         List<Attribute> predefinedAttributes = descriptionRegistry.getPredefinedAttributes(myType);
         Assert.assertEquals(predefinedAttributes.size(), 2);
         Attribute a = findAttribute("name1", predefinedAttributes);
         Assert.assertNotNull(a);
-        Assert.assertEquals(a.getValue(), "value1");
-        a = findAttribute("name2", predefinedAttributes);
-        Assert.assertNotNull(a);
-        Assert.assertEquals(a.getValue(), "value2");
+
+
+        try {
+            Assert.assertEquals(a.getValue(), "value1");
+            a = findAttribute("name2", predefinedAttributes);
+            Assert.assertNotNull(a);
+            Assert.assertEquals(a.getValue(), "value2");
+        } catch (ValueStorageException e) {
+            Assert.fail(e.getMessage());
+        }
+    }
+
+    @Test
+    public void testRegisterProjectTypeWithIconRegistry() {
+        final ProjectType type = new ProjectType("my_type", "my_type", "my_category");
+        final List<Attribute> attributes = Arrays.asList(new Attribute("name1", "value1"), new Attribute("name2", "value2"));
+        descriptionRegistry.registerProjectType(new ProjectTypeExtension() {
+            @Override
+            public ProjectType getProjectType() {
+                return type;
+            }
+
+            @Override
+            public List<Attribute> getPredefinedAttributes() {
+                return attributes;
+            }
+
+            @Override
+            public Builders getBuilders() {
+                return null;
+            }
+
+            @Override
+            public Runners getRunners() {
+                return null;
+            }
+
+            @Override
+            public List<ProjectTemplateDescription> getTemplates() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public Map<String, String> getIconRegistry() {
+                Map<String, String> icons = new HashMap<String, String>();
+                icons.put("BIG", "/aaa/bbb/ccc.xml");
+                return icons;
+            }
+        });
+        ProjectType myType = descriptionRegistry.getProjectType("my_type");
+        Assert.assertNotNull(myType);
+        Map<String, String> iconRegistry = descriptionRegistry.getIconRegistry(myType);
+        Assert.assertNotNull(iconRegistry);
+        Assert.assertTrue(iconRegistry.containsKey("BIG"));
+        Assert.assertEquals(iconRegistry.get("BIG"), "test/host/aaa/bbb/ccc.xml");
+
     }
 
     private Attribute findAttribute(String name, List<Attribute> list) {

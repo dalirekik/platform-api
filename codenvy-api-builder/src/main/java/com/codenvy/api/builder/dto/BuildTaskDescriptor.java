@@ -11,6 +11,7 @@
 package com.codenvy.api.builder.dto;
 
 import com.codenvy.api.builder.BuildStatus;
+import com.codenvy.api.core.rest.shared.dto.Hyperlinks;
 import com.codenvy.api.core.rest.shared.dto.Link;
 import com.codenvy.dto.shared.DTO;
 
@@ -24,12 +25,18 @@ import java.util.List;
  * @author andrew00x
  */
 @DTO
-public interface BuildTaskDescriptor {
+public interface BuildTaskDescriptor extends Hyperlinks {
     BuildStatus getStatus();
 
     BuildTaskDescriptor withStatus(BuildStatus status);
 
     void setStatus(BuildStatus status);
+
+    long getCreationTime();
+
+    BuildTaskDescriptor withCreationTime(long creationTime);
+
+    void setCreationTime(long creationTime);
 
     long getStartTime();
 
@@ -42,12 +49,6 @@ public interface BuildTaskDescriptor {
     BuildTaskDescriptor withEndTime(long endTime);
 
     void setEndTime(long endTime);
-
-    List<Link> getLinks();
-
-    BuildTaskDescriptor withLinks(List<Link> links);
-
-    void setLinks(List<Link> links);
 
     long getTaskId();
 
@@ -66,4 +67,6 @@ public interface BuildTaskDescriptor {
     BuildTaskDescriptor withBuildStats(List<BuilderMetric> stats);
 
     void setBuildStats(List<BuilderMetric> stats);
+
+    BuildTaskDescriptor withLinks(List<Link> links);
 }

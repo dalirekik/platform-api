@@ -12,6 +12,7 @@ package com.codenvy.api.user.shared.dto;
 
 import com.codenvy.api.core.rest.shared.dto.Link;
 import com.codenvy.dto.shared.DTO;
+import com.wordnik.swagger.annotations.ApiModelProperty;
 
 import java.util.List;
 import java.util.Map;
@@ -24,10 +25,12 @@ public interface ProfileDescriptor {
 
     void setId(String id);
 
+    @ApiModelProperty(value = "Profile ID")
     String getId();
 
     ProfileDescriptor withId(String id);
 
+    @ApiModelProperty(value = "User ID")
     String getUserId();
 
     void setUserId(String id);
@@ -45,10 +48,4 @@ public interface ProfileDescriptor {
     void setLinks(List<Link> links);
 
     ProfileDescriptor withLinks(List<Link> links);
-
-    Map<String, String> getPreferences();
-
-    void setPreferences(Map<String, String> prefs);
-
-    ProfileDescriptor withPreferences(Map<String, String> prefs);
 }

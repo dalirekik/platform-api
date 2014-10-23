@@ -13,11 +13,14 @@ package com.codenvy.api.project.server;
 import com.codenvy.api.core.ConflictException;
 import com.codenvy.api.core.ForbiddenException;
 import com.codenvy.api.core.ServerException;
+import com.codenvy.api.core.util.LineConsumerFactory;
 
 import javax.inject.Singleton;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.util.Map;
 
 /**
  * @author Vitaly Parfonov
@@ -36,12 +39,21 @@ public class ZipProjectImporter implements ProjectImporter {
 
     @Override
     public String getDescription() {
-        return "Add possibility to import project from zip archive located by public URL";
+        return "Import project from ZIP archive under a public URL.";
     }
 
     @Override
-    public void importSources(FolderEntry baseFolder, String location) throws ForbiddenException, ConflictException, IOException,
-                                                                              ServerException {
+    public void importSources(FolderEntry baseFolder, String location, Map<String, String> parameters)
+            throws ForbiddenException, ConflictException, IOException, ServerException {
+        importSources(baseFolder, location, parameters, LineConsumerFactory.NULL);
+    }
+
+    @Override
+    public void importSources(FolderEntry baseFolder,
+                              String location,
+                              Map<String, String> parameters,
+                              LineConsumerFactory importOutputConsumerFactory)
+            throws ForbiddenException, ConflictException, IOException, ServerException {
         URL url;
         if (location.startsWith("http://") || location.startsWith("https://")) {
             url = new URL(location);
@@ -60,5 +72,11 @@ public class ZipProjectImporter implements ProjectImporter {
         try (InputStream zip = url.openStream()) {
             baseFolder.getVirtualFile().unzip(zip, true);
         }
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public ImporterCategory getCategory() {
+        return ImporterCategory.ARCHIVE;
     }
 }

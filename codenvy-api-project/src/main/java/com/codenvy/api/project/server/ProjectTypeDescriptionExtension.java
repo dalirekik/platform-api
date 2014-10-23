@@ -10,9 +10,7 @@
  *******************************************************************************/
 package com.codenvy.api.project.server;
 
-import com.codenvy.api.project.shared.AttributeDescription;
-import com.codenvy.api.project.shared.ProjectType;
-
+import javax.annotation.Nonnull;
 import java.util.List;
 
 /**
@@ -24,9 +22,15 @@ import java.util.List;
  * @author gazarenkov
  */
 public interface ProjectTypeDescriptionExtension {
-    /** Gets list of ProjectType registered with this {@code ProjectTypeDescriptionExtension}. */
+    /** Gets list of ProjectType registered with this {@code ProjectTypeDescriptionExtension}.
+     *  Can't be null
+     * */
+    @Nonnull
     List<ProjectType> getProjectTypes();
 
-    /** Gets list of AttributeDescription that may be defined for project type. */
+    /** Gets list of AttributeDescription that may be defined for project type.
+     * Can't be null. In case no attributes description must return empty list.
+     * */
+    @Nonnull
     List<AttributeDescription> getAttributeDescriptions();
 }

@@ -6,11 +6,12 @@
  * http://www.eclipse.org/legal/epl-v10.html
  *
  * Contributors:
- *   Codenvy, S.A. - initial API and implementation
+ * Codenvy, S.A. - initial API and implementation
  *******************************************************************************/
 package com.codenvy.dto.generator;
 
 import com.codenvy.dto.shared.CompactJsonDto;
+import com.codenvy.dto.shared.DelegateTo;
 import com.codenvy.dto.shared.SerializationIndex;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -20,28 +21,20 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
 /** Abstract base class for the source generating template for a single DTO. */
 abstract class DtoImpl {
-    // If routingType is RoutableDto.INVALID_TYPE, then we simply exclude it
-    // from our routing table.
-    private final int routingType;
-
-    private final Class<?> dtoInterface;
-
-    private final DtoTemplate enclosingTemplate;
-
-    private final boolean compactJson;
-
-    final String implClassName;
-
+    private final Class<?>     dtoInterface;
+    private final DtoTemplate  enclosingTemplate;
+    private final boolean      compactJson;
+    private final String       implClassName;
     private final List<Method> dtoMethods;
 
-    DtoImpl(DtoTemplate enclosingTemplate, int routingType, Class<?> dtoInterface) {
+    DtoImpl(DtoTemplate enclosingTemplate, Class<?> dtoInterface) {
         this.enclosingTemplate = enclosingTemplate;
-        this.routingType = routingType;
         this.dtoInterface = dtoInterface;
         this.implClassName = dtoInterface.getSimpleName() + "Impl";
         this.compactJson = DtoTemplate.implementsInterface(dtoInterface, CompactJsonDto.class);
@@ -60,20 +53,34 @@ abstract class DtoImpl {
         return enclosingTemplate;
     }
 
-    public int getRoutingType() {
-        return routingType;
-    }
-
-    protected String getFieldName(String methodName) {
+    protected String getJavaFieldName(String getterName) {
         String fieldName;
-        if (methodName.startsWith("get")) {
-            fieldName = methodName.substring(3);
+        if (getterName.startsWith("get")) {
+            fieldName = getterName.substring(3);
         } else {
             // starts with "is", see method '#ignoreMethod(Method)'
-            fieldName = methodName.substring(2);
+            fieldName = getterName.substring(2);
         }
-        fieldName = Character.toLowerCase(fieldName.charAt(0)) + fieldName.substring(1);
+        return normalizeIdentifier(Character.toLowerCase(fieldName.charAt(0)) + fieldName.substring(1));
+    }
+
+    private String normalizeIdentifier(String fieldName) {
+        // use $ prefix according to http://docs.oracle.com/javase/specs/jls/se7/html/jls-3.html#jls-3.8
+        switch (fieldName) {
+            case "default":
+                fieldName = "$" + fieldName;
+                break;
+            // add other keywords here
+        }
         return fieldName;
+    }
+
+    private String getCamelCaseName(String fieldName) {
+        // see normalizeIdentifier method
+        if (fieldName.charAt(0) == '$') {
+            fieldName = fieldName.substring(1);
+        }
+        return Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
     }
 
     protected String getImplClassName() {
@@ -104,72 +111,112 @@ abstract class DtoImpl {
         return "ensure" + getCamelCaseName(fieldName);
     }
 
-    protected String getCamelCaseName(String fieldName) {
-        return Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
+    protected String getJsonFieldName(String getterName) {
+        String fieldName;
+        if (getterName.startsWith("get")) {
+            fieldName = getterName.substring(3);
+        } else {
+            // starts with "is", see method '#ignoreMethod(Method)'
+            fieldName = getterName.substring(2);
+        }
+        return Character.toLowerCase(fieldName.charAt(0)) + fieldName.substring(1);
     }
 
     /**
-     * Our super interface may implement some other interface (or not). We need to
-     * know because if it does then we need to directly extend said super
-     * interfaces impl class.
+     * Our super interface may implement some other interface (or not). We need to know because if it does then we need to directly extend
+     * said super interfaces impl class.
      */
-    protected Class<?> getSuperInterface() {
-        Class<?>[] superInterfaces = dtoInterface.getInterfaces();
+    protected Class<?> getSuperInterface(Class<?> dto) {
+        Class<?>[] superInterfaces = dto.getInterfaces();
         return superInterfaces.length == 0 ? null : superInterfaces[0];
     }
 
-    /**
-     * We need not generate a field and method for any method present on a parent
-     * interface that our interface may inherit from. We only care about the new
-     * methods defined on our superInterface.
-     */
-    protected boolean ignoreMethod(Method method) {
-        if (method == null) {
-            return true;
+    protected List<Method> getDtoGetters(Class<?> dto) {
+        List<Method> getters = new ArrayList<>();
+        if (enclosingTemplate.isDtoInterface(dto)) {
+            addDtoGetters(dto, getters);
         }
+        return getters;
+    }
 
-        if (!isDtoGetter(method)) {
-            return true;
+    protected List<Method> getInheritedDtoGetters(Class<?> dto) {
+        List<Method> getters = new ArrayList<>();
+        if (enclosingTemplate.isDtoInterface(dto)) {
+            Class<?> superInterface = getSuperInterface(getDtoInterface());
+            while (superInterface != null) {
+                addDtoGetters(superInterface, getters);
+                superInterface = getSuperInterface(superInterface);
+            }
+
+            addDtoGetters(dto, getters);
         }
+        return getters;
+    }
 
-        // Look at any interfaces our superInterface implements.
-        Class<?>[] superInterfaces = dtoInterface.getInterfaces();
-        List<Method> methodsToExclude = new ArrayList<Method>();
-
-        // Collect methods on parent interfaces
-        for (Class<?> parent : superInterfaces) {
-            for (Method m : parent.getMethods()) {
-                methodsToExclude.add(m);
+    private void addDtoGetters(Class<?> dto, List<Method> getters) {
+        for (Method method : dto.getDeclaredMethods()) {
+            if (isDtoGetter(method)) {
+                getters.add(method);
             }
         }
+    }
 
-        for (Method m : methodsToExclude) {
-            if (m.equals(method)) {
+    /** Check is specified method is DTO getter. */
+    protected boolean isDtoGetter(Method method) {
+        if (method.isAnnotationPresent(DelegateTo.class)) {
+            return false;
+        }
+        String methodName = method.getName();
+        if ((methodName.startsWith("get") || methodName.startsWith("is")) && method.getParameterTypes().length == 0) {
+            if (methodName.startsWith("is") && methodName.length() > 2) {
+                return method.getReturnType() == Boolean.class || method.getReturnType() == boolean.class;
+            }
+            return methodName.length() > 3;
+        }
+        return false;
+    }
+
+    /** Tests whether or not a given generic type is allowed to be used as a generic. */
+    protected static boolean isWhitelisted(Class<?> genericType) {
+        return DtoTemplate.jreWhitelist.contains(genericType);
+    }
+
+    /** Tests whether or not a given return type is a number primitive or its wrapper type. */
+    protected static boolean isNumber(Class<?> returnType) {
+        final Class<?>[] numericTypes = {int.class, long.class, short.class, float.class, double.class, byte.class,
+                                         Integer.class, Long.class, Short.class, Float.class, Double.class, Byte.class};
+        for (Class<?> standardPrimitive : numericTypes) {
+            if (returnType.equals(standardPrimitive)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** Check is specified method is DTO getter. */
-    protected boolean isDtoGetter(Method method) {
-        String methodName = method.getName();
-        if (methodName.startsWith("get") || methodName.startsWith("is")) {
-            if (methodName.startsWith("is")) {
-                return method.getReturnType() == Boolean.class || method.getReturnType() == boolean.class;
-            }
-            return true;
-        }
-        return false;
+    /** Tests whether or not a given return type is a boolean primitive or its wrapper type. */
+    protected static boolean isBoolean(Class<?> returnType) {
+        return returnType.equals(Boolean.class) || returnType.equals(boolean.class);
     }
 
-    /**
-     * Tests whether or not a given generic type is allowed to be used as a
-     * generic.
-     */
-
-    protected static boolean isWhitelisted(Class<?> genericType) {
-        return DtoTemplate.jreWhitelist.contains(genericType);
+    protected static String getPrimitiveName(Class<?> returnType) {
+        if (returnType.equals(Integer.class) || returnType.equals(int.class)) {
+            return "int";
+        } else if (returnType.equals(Long.class) || returnType.equals(long.class)) {
+            return "long";
+        } else if (returnType.equals(Short.class) || returnType.equals(short.class)) {
+            return "short";
+        } else if (returnType.equals(Float.class) || returnType.equals(float.class)) {
+            return "float";
+        } else if (returnType.equals(Double.class) || returnType.equals(double.class)) {
+            return "double";
+        } else if (returnType.equals(Byte.class) || returnType.equals(byte.class)) {
+            return "byte";
+        } else if (returnType.equals(Boolean.class) || returnType.equals(boolean.class)) {
+            return "boolean";
+        } else if (returnType.equals(Character.class) || returnType.equals(char.class)) {
+            return "char";
+        }
+        throw new IllegalArgumentException("Unknown wrapper class type.");
     }
 
     /** Tests whether or not a given return type is a java.util.List. */
@@ -183,15 +230,13 @@ abstract class DtoImpl {
     }
 
     /**
-     * Expands the type and its first generic parameter (which can also have a
-     * first generic parameter (...)).
+     * Expands the type and its first generic parameter (which can also have a first generic parameter (...)).
      * <p/>
-     * For example, JsonArray&lt;JsonStringMap&lt;JsonArray&lt;SomeDto&gt;&gt;&gt;
-     * would produce [JsonArray, JsonStringMap, JsonArray, SomeDto].
+     * For example, JsonArray&lt;JsonStringMap&lt;JsonArray&lt;SomeDto&gt;&gt;&gt; would produce [JsonArray, JsonStringMap, JsonArray,
+     * SomeDto].
      */
     public static List<Type> expandType(Type curType) {
-        List<Type> types = new ArrayList<Type>();
-
+        List<Type> types = new LinkedList<>();
         do {
             types.add(curType);
 
@@ -200,36 +245,28 @@ abstract class DtoImpl {
                 Type rawType = ((ParameterizedType)curType).getRawType();
                 boolean map = rawType instanceof Class<?> && rawType == Map.class;
                 if (!map && genericParamTypes.length != 1) {
-                    throw new IllegalStateException(
-                            "Multiple type parameters are not supported (neither are zero type parameters)");
+                    throw new IllegalStateException("Multiple type parameters are not supported (neither are zero type parameters)");
                 }
-
                 Type genericParamType = map ? genericParamTypes[1] : genericParamTypes[0];
                 if (genericParamType instanceof Class<?>) {
                     Class<?> genericParamTypeClass = (Class<?>)genericParamType;
                     if (isWhitelisted(genericParamTypeClass)) {
                         assert genericParamTypeClass.equals(
-                                String.class) : "For JSON serialization there can be only strings or DTO types. " +
-                                                "Please ping smok@ if you see this assert happening.";
+                                String.class) : "For JSON serialization there can be only strings or DTO types. ";
                     }
                 }
-
                 curType = genericParamType;
-
             } else {
                 if (curType instanceof Class) {
                     Class<?> clazz = (Class<?>)curType;
                     if (isList(clazz) || isMap(clazz)) {
                         throw new DtoTemplate.MalformedDtoInterfaceException(
-                                "JsonArray and JsonStringMap MUST have a generic type specified (and no... ? " + "doesn't cut it!).");
+                                "JsonArray and JsonStringMap MUST have a generic type specified (and no... ? doesn't cut it!).");
                     }
                 }
-
                 curType = null;
             }
-        }
-        while (curType != null);
-
+        } while (curType != null);
         return types;
     }
 
@@ -237,15 +274,11 @@ abstract class DtoImpl {
         return (Class<?>)((type instanceof ParameterizedType) ? ((ParameterizedType)type).getRawType() : type);
     }
 
-    String getRoutingTypeField() {
-        return dtoInterface.getSimpleName().toUpperCase() + "_TYPE";
-    }
-
     /**
      * Returns public methods specified in DTO interface.
      * <p/>
-     * <p>For compact DTO (see {@link CompactJsonDto}) methods are ordered
-     * corresponding to {@link SerializationIndex} annotation.
+     * <p>For compact DTO (see {@link com.codenvy.dto.shared.CompactJsonDto}) methods are ordered corresponding to {@link
+     * com.codenvy.dto.shared.SerializationIndex} annotation.
      * <p/>
      * <p>Gaps in index sequence are filled with {@code null}s.
      */
@@ -258,7 +291,7 @@ abstract class DtoImpl {
             return dtoInterface.getMethods();
         }
 
-        Map<Integer, Method> methodsMap = new HashMap<Integer, Method>();
+        Map<Integer, Method> methodsMap = new HashMap<>();
         int maxIndex = 0;
         for (Method method : dtoInterface.getMethods()) {
             SerializationIndex serializationIndex = method.getAnnotation(SerializationIndex.class);
@@ -293,8 +326,7 @@ abstract class DtoImpl {
     }
 
     /**
-     * @return String representing the source definition for the DTO impl as an
-     *         inner class.
+     * @return String representing the source definition for the DTO impl as an inner class.
      */
     abstract String serialize();
 }

@@ -52,10 +52,6 @@ public interface RunRequest {
     /**
      * Get id of environment that should be used for running an application. If this parameter is omitted then runner will use default
      * environment.
-     *
-     * @see RunnerDescriptor#getEnvironments()
-     * @see com.codenvy.api.runner.dto.RunnerEnvironment
-     * @see com.codenvy.api.runner.dto.RunOptions
      */
     String getEnvironmentId();
 
@@ -63,19 +59,19 @@ public interface RunRequest {
 
     RunRequest withEnvironmentId(String environmentId);
 
-    /** Location of files that contains run scripts. */
-    List<String> getRunnerScriptUrls();
+    /** Location of files that contains run recipes. */
+    List<String> getRecipeUrls();
 
-    void setRunnerScriptUrls(List<String> scripts);
+    void setRecipeUrls(List<String> recipes);
 
-    RunRequest withRunnerScriptUrls(List<String> scripts);
+    RunRequest withRecipeUrls(List<String> scripts);
 
-    /** Optional parameter which may be specified by user if need to run application under debug. */
-    DebugMode getDebugMode();
+    /** Enables or disables debug mode of runner. Not all Runner implementations support debug mode. */
+    boolean isInDebugMode();
 
-    void setDebugMode(DebugMode debugMode);
+    void setInDebugMode(boolean debugMode);
 
-    RunRequest withDebugMode(DebugMode debugMode);
+    RunRequest withInDebugMode(boolean debugMode);
 
     /** Get memory size (in megabytes) that is required for starting application. */
     int getMemorySize();
@@ -84,12 +80,19 @@ public interface RunRequest {
 
     RunRequest withMemorySize(int mem);
 
-    /** Optional parameters for Runner. Supported options depend on Runner implementation. */
+    /** Options for Runner. Supported options depend on Runner implementation. */
     Map<String, String> getOptions();
 
     void setOptions(Map<String, String> options);
 
     RunRequest withOptions(Map<String, String> options);
+
+    /** Environment variables for runner. Supported variables depend on Runner implementation. */
+    Map<String, String> getVariables();
+
+    void setVariables(Map<String, String> variables);
+
+    RunRequest withVariables(Map<String, String> variables);
 
     /** @see RunOptions#getShellOptions() */
     Map<String, String> getShellOptions();
