@@ -14,16 +14,21 @@ import com.codenvy.api.auth.shared.dto.Credentials;
 import com.codenvy.api.auth.shared.dto.Token;
 import com.codenvy.api.core.ApiException;
 import com.codenvy.dto.server.DtoFactory;
-import com.wordnik.swagger.annotations.*;
-
+import com.wordnik.swagger.annotations.Api;
+import com.wordnik.swagger.annotations.ApiOperation;
+import com.wordnik.swagger.annotations.ApiParam;
+import com.wordnik.swagger.annotations.ApiResponse;
+import com.wordnik.swagger.annotations.ApiResponses;
 
 import javax.inject.Inject;
-import javax.servlet.http.Cookie;
-import javax.ws.rs.*;
-import javax.ws.rs.core.Context;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
 
 /**
  * Authenticate user by username and password.
@@ -66,9 +71,7 @@ public class AuthenticationService {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("/login")
-    public Token authenticate(Credentials credentials,
-                              @Context UriInfo uriInfo)
-            throws ApiException {
+    public Token authenticate(Credentials credentials) throws ApiException {
 
         if (credentials == null
             || credentials.getPassword() == null
@@ -95,7 +98,7 @@ public class AuthenticationService {
             @ApiResponse(code = 400, message = "Authentication error")})
     @POST
     @Path("/logout")
-    public void logout(@ApiParam(value = "Auth token", required = true) @QueryParam("token") String token, @Context UriInfo uriInfo) {
+    public void logout(@ApiParam(value = "Auth token", required = true) @QueryParam("token") String token) {
         if (token == null) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
