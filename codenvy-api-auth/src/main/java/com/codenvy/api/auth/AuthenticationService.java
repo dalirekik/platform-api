@@ -65,12 +65,8 @@ public class AuthenticationService {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-
     @Path("/login")
-    public Token authenticate(Credentials credentials,
-                              @ApiParam(value = "Existing auth cookie. It is used to get deleted to a obtain new cookie")
-                              @CookieParam("session-access-key") Cookie tokenAccessCookie,
-                              @Context UriInfo uriInfo)
+    public Token authenticate(Credentials credentials, @Context UriInfo uriInfo)
             throws ApiException {
 
         if (credentials == null
@@ -98,11 +94,7 @@ public class AuthenticationService {
             @ApiResponse(code = 400, message = "Authentication error")})
     @POST
     @Path("/logout")
-    public void logout(@ApiParam(value = "Auth token", required = true)
-                       @QueryParam("token") String token,
-                       @ApiParam(value = "Existing auth cookie. It is used to get deleted to a obtain new cookie")
-                       @CookieParam("session-access-key") Cookie tokenAccessCookie,
-                       @Context UriInfo uriInfo) {
+    public void logout(@ApiParam(value = "Auth token", required = true) @QueryParam("token") String token, @Context UriInfo uriInfo) {
         if (token == null) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
