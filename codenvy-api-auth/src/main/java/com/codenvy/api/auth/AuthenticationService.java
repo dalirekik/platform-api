@@ -66,7 +66,8 @@ public class AuthenticationService {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("/login")
-    public Token authenticate(Credentials credentials, @Context UriInfo uriInfo)
+    public Token authenticate(Credentials credentials,
+                              @Context UriInfo uriInfo)
             throws ApiException {
 
         if (credentials == null
