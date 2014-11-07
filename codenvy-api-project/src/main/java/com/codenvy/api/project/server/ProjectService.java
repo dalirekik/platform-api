@@ -36,7 +36,6 @@ import com.codenvy.api.project.shared.dto.RunnerEnvironment;
 import com.codenvy.api.project.shared.dto.RunnerEnvironmentLeaf;
 import com.codenvy.api.project.shared.dto.RunnerEnvironmentTree;
 import com.codenvy.api.project.shared.dto.RunnerSource;
-import com.codenvy.api.project.shared.dto.Source;
 import com.codenvy.api.project.shared.dto.TreeElement;
 import com.codenvy.api.vfs.server.ContentStream;
 import com.codenvy.api.vfs.server.VirtualFile;
@@ -46,6 +45,7 @@ import com.codenvy.api.vfs.server.search.SearcherProvider;
 import com.codenvy.api.vfs.shared.dto.AccessControlEntry;
 import com.codenvy.api.vfs.shared.dto.Principal;
 import com.codenvy.commons.env.EnvironmentContext;
+import com.codenvy.commons.lang.NamedThreadFactory;
 import com.codenvy.dto.server.DtoFactory;
 import com.wordnik.swagger.annotations.Api;
 import com.wordnik.swagger.annotations.ApiOperation;
@@ -57,8 +57,10 @@ import org.apache.commons.fileupload.FileItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.PreDestroy;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.DefaultValue;
@@ -83,6 +85,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * @author andrew00x
@@ -92,6 +96,7 @@ import java.util.Set;
 @Api(value = "/project",
      description = "Project manager")
 @Path("/project/{ws-id}")
+@Singleton // important to have singleton
 public class ProjectService extends Service {
     private static final Logger LOG = LoggerFactory.getLogger(ProjectService.class);
 
@@ -107,6 +112,31 @@ public class ProjectService extends Service {
     private ProjectTypeResolverRegistry resolverRegistry;
     @Inject
     private EventService                eventService;
+
+    private final ExecutorService executor = Executors.newFixedThreadPool(1 + Runtime.getRuntime().availableProcessors(),
+                                                                          new NamedThreadFactory("ProjectService-IndexingThread-", true));
+
+    @PreDestroy
+    void stop() {
+        executor.shutdownNow();
+    }
+
+
+    /**
+     * Class for internal use. Need for marking not valid project.
+     * This need for giving possibility to end user to fix problems in project settings.
+     * Will be useful then we will migrate IDE2 project to the IDE3 file system.
+     */
+    private class NotValidProject extends Project {
+        public NotValidProject(FolderEntry baseFolder, ProjectManager manager) {
+            super(baseFolder, manager);
+        }
+
+        @Override
+        public ProjectDescription getDescription() throws ServerException, ValueStorageException {
+            throw new ServerException("Looks like this is not valid project. We will mark it as broken");
+        }
+    }
 
     @ApiOperation(value = "Gets list of projects in root folder",
                   response = ProjectReference.class,
@@ -131,6 +161,17 @@ public class ProjectService extends Service {
                 LOG.error(e.getMessage(), e);
             }
         }
+        FolderEntry projectsRoot = projectManager.getProjectsRoot(workspace);
+        List<VirtualFileEntry> children = projectsRoot.getChildren();
+        for(VirtualFileEntry child : children) {
+            if (child.isFolder()) {
+                FolderEntry folderEntry = (FolderEntry)child;
+                if (!folderEntry.isProjectFolder()) {
+                    NotValidProject notValidProject = new NotValidProject(folderEntry, projectManager);
+                    projectReferences.add(DtoConverter.toReferenceDto(notValidProject, getServiceContext().getServiceUriBuilder()));
+                }
+            }
+        }
         return projectReferences;
     }
 
@@ -152,7 +193,14 @@ public class ProjectService extends Service {
             throws NotFoundException, ForbiddenException, ServerException, ConflictException {
         final Project project = projectManager.getProject(workspace, path);
         if (project == null) {
-            throw new NotFoundException(String.format("Project '%s' doesn't exist in workspace '%s'.", path, workspace));
+            FolderEntry projectsRoot = projectManager.getProjectsRoot(workspace);
+            VirtualFileEntry child = projectsRoot.getChild(path);
+            if (child != null && child.isFolder()  && child.getParent().isRoot()) {
+                NotValidProject notValidProject = new NotValidProject((FolderEntry)child, projectManager);
+                return DtoConverter.toDescriptorDto(notValidProject, getServiceContext().getServiceUriBuilder());
+            } else {
+                throw new NotFoundException(String.format("Project '%s' doesn't exist in workspace '%s'.", path, workspace));
+            }
         }
         return DtoConverter.toDescriptorDto(project, getServiceContext().getServiceUriBuilder());
     }
@@ -181,9 +229,6 @@ public class ProjectService extends Service {
         final Project project = projectManager.createProject(workspace, name,
                                                              DtoConverter.fromDto(newProject, projectManager.getTypeDescriptionRegistry()));
         final String visibility = newProject.getVisibility();
-        final ProjectMisc misc = project.getMisc();
-        misc.setCreationDate(System.currentTimeMillis());
-        misc.save(); // Important to save misc!!
 
         if (visibility != null) {
             project.setVisibility(visibility);
@@ -284,9 +329,15 @@ public class ProjectService extends Service {
                                            @PathParam("path") String path,
                                            ProjectUpdate update)
             throws NotFoundException, ConflictException, ForbiddenException, ServerException {
-        final Project project = projectManager.getProject(workspace, path);
+        Project project = projectManager.getProject(workspace, path);
         if (project == null) {
-            throw new NotFoundException(String.format("Project '%s' doesn't exist in workspace '%s'.", path, workspace));
+            FolderEntry projectsRoot = projectManager.getProjectsRoot(workspace);
+            VirtualFileEntry child = projectsRoot.getChild(path);
+            if (child != null && child.isFolder() && child.getParent().isRoot()) {
+                project = new Project((FolderEntry)child, projectManager);
+            } else {
+                throw new NotFoundException(String.format("Project '%s' doesn't exist in workspace '%s'.", path, workspace));
+            }
         }
         project.updateDescription(DtoConverter.fromDto(update, projectManager.getTypeDescriptionRegistry()));
         return DtoConverter.toDescriptorDto(project, getServiceContext().getServiceUriBuilder());
@@ -663,12 +714,20 @@ public class ProjectService extends Service {
         }
         // Some importers don't use virtual file system API and changes are not indexed.
         // Force searcher to reindex project to fix such issues.
-        VirtualFile file = project.getBaseFolder().getVirtualFile();
-        searcherProvider.getSearcher(file.getMountPoint(), true).add(file);
+        final VirtualFile file = project.getBaseFolder().getVirtualFile();
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    searcherProvider.getSearcher(file.getMountPoint(), true).add(file);
+                } catch (ServerException e) {
+                    LOG.error(e.getMessage());
+                }
+            }
+        });
         if (creationDate > 0) {
             final ProjectMisc misc = project.getMisc();
             misc.setCreationDate(creationDate);
-            misc.save(); // Important to save misc!!
         }
 
         VirtualFileEntry environmentsFolder = baseProjectFolder.getChild(Constants.CODENVY_RUNNER_ENVIRONMENTS_DIR);
@@ -695,7 +754,7 @@ public class ProjectService extends Service {
                         }
                     } else {
                         LOG.warn(
-                                "ProjectService.importProject :: not valid runner source location availabel only http or https scheme but" +
+                                "ProjectService.importProject :: not valid runner source location available only http or https scheme but" +
                                 " we get :" +
                                 runnerSourceLocation);
                     }
@@ -1092,17 +1151,21 @@ public class ProjectService extends Service {
         final Project project = projectManager.getProject(workspace, path);
         final DtoFactory dtoFactory = DtoFactory.getInstance();
         final RunnerEnvironmentTree root = dtoFactory.createDto(RunnerEnvironmentTree.class).withDisplayName("project");
-        final List<RunnerEnvironmentLeaf> environments = new LinkedList<>();
-        final VirtualFileEntry environmentsFolder = project.getBaseFolder().getChild(Constants.CODENVY_RUNNER_ENVIRONMENTS_DIR);
-        if (environmentsFolder != null && environmentsFolder.isFolder()) {
-            for (FolderEntry childFolder : ((FolderEntry)environmentsFolder).getChildFolders()) {
-                final String id = new EnvironmentId(EnvironmentId.Scope.project, childFolder.getName()).toString();
-                environments.add(dtoFactory.createDto(RunnerEnvironmentLeaf.class)
-                                           .withEnvironment(dtoFactory.createDto(RunnerEnvironment.class).withId(id))
-                                           .withDisplayName(childFolder.getName()));
+        if (project != null) {
+            final List<RunnerEnvironmentLeaf> environments = new LinkedList<>();
+            final VirtualFileEntry environmentsFolder = project.getBaseFolder().getChild(Constants.CODENVY_RUNNER_ENVIRONMENTS_DIR);
+            if (environmentsFolder != null && environmentsFolder.isFolder()) {
+                for (FolderEntry childFolder : ((FolderEntry)environmentsFolder).getChildFolders()) {
+                    final String id = new EnvironmentId(EnvironmentId.Scope.project, childFolder.getName()).toString();
+                    environments.add(dtoFactory.createDto(RunnerEnvironmentLeaf.class)
+                                               .withEnvironment(dtoFactory.createDto(RunnerEnvironment.class).withId(id))
+                                               .withDisplayName(childFolder.getName()));
+                }
             }
+            return root.withLeaves(environments);
+        } else {
+            return root.withLeaves(Collections.<RunnerEnvironmentLeaf>emptyList());
         }
-        return root.withLeaves(environments);
     }
 
     private FileEntry asFile(String workspace, String path) throws ForbiddenException, NotFoundException, ServerException {
