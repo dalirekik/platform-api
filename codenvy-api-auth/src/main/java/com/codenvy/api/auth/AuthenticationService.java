@@ -20,6 +20,7 @@ import com.wordnik.swagger.annotations.ApiParam;
 import com.wordnik.swagger.annotations.ApiResponse;
 import com.wordnik.swagger.annotations.ApiResponses;
 
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -47,9 +48,12 @@ public class AuthenticationService {
 
     private final AuthenticationDao dao;
 
+    private final ResponseBuilder responseBuilder;
+
     @Inject
-    public AuthenticationService(AuthenticationDao dao) {
+    public AuthenticationService(AuthenticationDao dao, ResponseBuilder cookiesBuilder) {
         this.dao = dao;
+        this.responseBuilder = cookiesBuilder;
     }
 
     /**
@@ -61,9 +65,9 @@ public class AuthenticationService {
      * @throws ApiException
      */
     @ApiOperation(value = "Login",
-                  notes = "Login to a Codenvy account. Either auth token or cookie are used",
-                  response = Token.class,
-                  position = 2)
+            notes = "Login to a Codenvy account. Either auth token or cookie are used",
+            response = Token.class,
+            position = 2)
     @ApiResponses(value = {
             @ApiResponse(code = 200, message = "OK"),
             @ApiResponse(code = 400, message = "Authentication error")})
@@ -80,7 +84,8 @@ public class AuthenticationService {
             || credentials.getUsername().isEmpty()) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
-        return  Response.ok().entity(dao.login(credentials)).build();
+
+        return responseBuilder.buildLoginResponse(dao.login(credentials));
     }
 
     /**
@@ -90,8 +95,8 @@ public class AuthenticationService {
      *         - authentication token
      */
     @ApiOperation(value = "Logout",
-                  notes = "Logout from a Codenvy account",
-                  position = 1)
+            notes = "Logout from a Codenvy account",
+            position = 1)
     @ApiResponses(value = {
             @ApiResponse(code = 200, message = "OK"),
             @ApiResponse(code = 400, message = "Authentication error")})
@@ -101,8 +106,9 @@ public class AuthenticationService {
         if (token == null) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
-        dao.logout(DtoFactory.getInstance().createDto(Token.class).withValue(token));
-        return Response.noContent().build();
+        Token dtoToken = DtoFactory.getInstance().createDto(Token.class).withValue(token);
+        dao.logout(dtoToken);
+        return responseBuilder.buildLogoutResponse(dtoToken);
     }
 
 }

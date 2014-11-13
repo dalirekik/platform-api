@@ -12,6 +12,7 @@
 
 import com.codenvy.api.auth.AuthenticationDao;
 import com.codenvy.api.auth.AuthenticationService;
+import com.codenvy.api.auth.DefaultAuthenticationResponseBuilder;
 import com.codenvy.api.auth.server.dto.DtoServerImpls;
 import com.codenvy.api.auth.shared.dto.Credentials;
 import com.codenvy.api.auth.shared.dto.Token;
@@ -25,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.Spy;
 import org.mockito.testng.MockitoTestNGListener;
 import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
@@ -40,6 +42,8 @@ public class AuthenticationServiceTest {
 
     @Mock
     AuthenticationDao dao;
+    @Spy
+    DefaultAuthenticationResponseBuilder responseBuilder = new DefaultAuthenticationResponseBuilder();
 
     @InjectMocks
     AuthenticationService service;
