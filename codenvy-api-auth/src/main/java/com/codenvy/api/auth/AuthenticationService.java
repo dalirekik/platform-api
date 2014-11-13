@@ -41,7 +41,7 @@ import javax.ws.rs.core.Response;
  */
 
 @Api(value = "/auth",
-     description = "Authentication manager")
+        description = "Authentication manager")
 @Path("/auth")
 public class AuthenticationService {
 
@@ -71,7 +71,7 @@ public class AuthenticationService {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("/login")
-    public Token authenticate(Credentials credentials) throws ApiException {
+    public Response login(Credentials credentials) throws ApiException {
 
         if (credentials == null
             || credentials.getPassword() == null
@@ -80,8 +80,7 @@ public class AuthenticationService {
             || credentials.getUsername().isEmpty()) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
-
-        return dao.login(credentials);
+        return  Response.ok().entity(dao.login(credentials)).build();
     }
 
     /**
@@ -98,11 +97,12 @@ public class AuthenticationService {
             @ApiResponse(code = 400, message = "Authentication error")})
     @POST
     @Path("/logout")
-    public void logout(@ApiParam(value = "Auth token", required = true) @QueryParam("token") String token) {
+    public Response logout(@ApiParam(value = "Auth token", required = true) @QueryParam("token") String token) {
         if (token == null) {
             throw new WebApplicationException(Response.Status.BAD_REQUEST);
         }
         dao.logout(DtoFactory.getInstance().createDto(Token.class).withValue(token));
+        return Response.noContent().build();
     }
 
 }
