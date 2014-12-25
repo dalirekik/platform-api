@@ -23,6 +23,7 @@ import com.codenvy.api.factory.dto.OnAppLoaded;
 import com.codenvy.api.factory.dto.OnProjectOpened;
 import com.codenvy.api.factory.dto.Policies;
 import com.codenvy.api.factory.dto.WelcomePage;
+import com.codenvy.api.factory.dto.Workspace;
 import com.codenvy.api.user.server.dao.Profile;
 import com.codenvy.api.user.server.dao.User;
 import com.codenvy.api.user.server.dao.UserDao;
@@ -271,6 +272,23 @@ public abstract class FactoryUrlBaseValidator {
 
         if (validUntil != null && validUntil != 0 && new Date().after(new Date(validUntil))) {
             throw new ConflictException(FactoryConstants.INVALID_VALIDUNTIL_MESSAGE);
+        }
+    }
+
+    protected void  validateLoginPolicies (Factory factory) throws ConflictException {
+        if (!"2.1".equals(factory.getV())) {
+            return;
+        }
+
+        final Policies policies = factory.getPolicies();
+        final Workspace workspace = factory.getWorkspace();
+
+        if (workspace != null) {
+            if ((null != workspace.getNamed() && workspace.getNamed()) &&
+                (policies == null || policies.getRequireAuthentication() == null ||
+                 policies.getRequireAuthentication().booleanValue() == false)) {
+                throw new ConflictException(FactoryConstants.INVALID_WORKSPACE_NAMED_MESSAGE);
+            }
         }
     }
 

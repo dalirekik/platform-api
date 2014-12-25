@@ -115,6 +115,7 @@ public abstract class NonEncodedFactoryBuilder {
         final Workspace workspace = factory.getWorkspace();
         if (workspace != null) {
             appendIfNotNull(builder, "&workspace.temp=", workspace.getTemp(), false);
+            appendIfNotNull(builder, "&workspace.named=", workspace.getNamed(), false);
             for (Map.Entry<String, String> entry : workspace.getAttributes().entrySet()) {
                 builder.append("&workspace.attributes.")
                        .append(encode(entry.getKey()))

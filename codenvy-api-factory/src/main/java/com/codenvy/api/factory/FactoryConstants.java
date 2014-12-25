@@ -64,6 +64,8 @@ public class FactoryConstants {
 
     public static final String INVALID_VALIDSINCE_MESSAGE = "Valid Since date cannot occur before the current date.";
 
+    public static final String INVALID_WORKSPACE_NAMED_MESSAGE = "Workspace/named cannot be applied without requireAuthentication policy.";
+
     public static final String INVALID_VALIDUNTIL_MESSAGE = "Valid Until date cannot occur before the current date.";
 
     public static final String INVALID_VALIDSINCEUNTIL_MESSAGE = "Valid Until date should occur after the Valid Since date.";

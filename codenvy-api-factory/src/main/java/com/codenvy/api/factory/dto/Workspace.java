@@ -37,5 +37,12 @@ public interface Workspace {
     void setAttributes(Map<String, String> attributes);
 
     Workspace withAttributes(Map<String, String> attributes);
+
+    @FactoryParameter(obligation = OPTIONAL, queryParameterName = "named")
+    Boolean getNamed();
+
+    void setNamed(Boolean named);
+
+    Workspace withNamed(Boolean named);
 }
 
