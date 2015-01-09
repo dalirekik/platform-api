@@ -33,6 +33,8 @@ public interface PaymentService {
      */
     void charge(Subscription subscription) throws ConflictException, ServerException, ForbiddenException;
 
+    void charge(String creditCardToken, double amount, String account) throws ServerException, ForbiddenException;
+
 
     /**
      * Retrieve credit card description from payment system
